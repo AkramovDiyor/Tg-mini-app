@@ -1,0 +1,1 @@
+export const rub = (n) => `${n.toLocaleString('ru-RU')} ₽`

@@ -1,0 +1,16 @@
+@import "tailwindcss";
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-slate-200 text-slate-900 antialiased;
+  }
+}
+
+
+
+/* прячем скроллбар в горизонтальной ленте дат */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
