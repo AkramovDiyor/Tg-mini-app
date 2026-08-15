@@ -36,7 +36,7 @@ type Master struct {
 func Get() Master {
 	return Master{
 		ID:         1,
-		TelegramID: 123456789,
+		TelegramID: 12345678910,
 		Name:       "Педро Барбер",
 		Bio:        "Барбер · 6 лет опыта",
 		Address:    "ул. Центральная, 1",

@@ -5,6 +5,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -12,7 +13,9 @@ import (
 type SlotRepository interface {
 	CreateSlot(ctx context.Context, slot models.Slot) error
 	GetSlotsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Slot, error)
-	UpdateSlotStatus(ctx context.Context, slotID int64, status string) error
+	UpdateSlotStatus(ctx context.Context, tx pgx.Tx, slotID int64, status string) error
+    GetSlotByID(ctx context.Context, tx pgx.Tx, slotID int64) (models.Slot, error)
+
 }
 
 
@@ -60,4 +63,23 @@ func (s *SlotRepo) GetSlotsByMasterAndDate(ctx context.Context, masterID int64, 
     }
 
     return slots, nil
+}
+
+
+func (s *SlotRepo) GetSlotByID(ctx context.Context, tx pgx.Tx, slotID int64) (models.Slot, error) {
+    var slot models.Slot
+    
+    // Обрати внимание на FOR UPDATE в конце запроса!
+    query := "SELECT id, master_id, start_time, end_time, status FROM slots WHERE id = $1 FOR UPDATE"
+    
+    err := tx.QueryRow(ctx, query, slotID).Scan(
+        &slot.ID, &slot.MasterID, &slot.StartTime, &slot.EndTime, &slot.Status,
+    )
+    
+    return slot, err
+}
+
+func (s *SlotRepo) UpdateSlotStatus(ctx context.Context, tx pgx.Tx, slotID int64, status string) error {
+    _, err := tx.Exec(ctx, "UPDATE slots SET status = $1 WHERE id = $2", status, slotID)
+    return err
 }
