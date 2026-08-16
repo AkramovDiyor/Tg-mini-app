@@ -33,7 +33,7 @@ func main() {
 	masterRepo := repositories.NewMasterRepo(pool)
 
 	testMaster := models.Get()
-	testMaster.InviteLink = "LINK////123243"
+	testMaster.InviteLink = "LINK////1232431212"
 	testMaster.TelegramID = time.Now().UnixNano()
 
 	err = masterRepo.CreateMaster(ctx, testMaster)

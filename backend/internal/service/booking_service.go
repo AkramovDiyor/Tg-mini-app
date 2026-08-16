@@ -44,7 +44,8 @@ func (s *BookingService) BookSlot(ctx context.Context, slotID int64, serviceID i
 	}
 
 	if slot.Status != "free" {
-		return errors.New("слот уже занят")
+		err = errors.New("слот уже занят")
+		return  err
 	}
 
 	err = s.slotRepo.UpdateSlotStatus(ctx, tx, slotID, "booked")
