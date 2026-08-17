@@ -19,7 +19,7 @@ type WebAppUser struct {
 	Username  string `json:"username"`
 }
 
-func ValidateInitDate(initDate string, botToken string) (int64, error)  {
+func ValidateInitData(initDate string, botToken string) (int64, error)  {
 	params, err := url.ParseQuery(initDate)
 	if err != nil {
 		return 0, err

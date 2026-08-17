@@ -1,0 +1,1392 @@
+--- FILE: ./internal/config/config.go ---
+package config
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/joho/godotenv"
+)
+
+// Config содержит все переменные окружения для работы приложения
+type Config struct {
+	DBHost     string
+	DBPort     string
+	DBUser     string
+	DBPassword string
+	DBName     string
+	TgBotToken string
+}
+
+// Load загружает файл .env и собирает структуру Config
+func Load() (Config, error) {
+	// Пытаемся загрузить .env файл.
+	// Если его нет (например, в Docker-контейнере), godotenv вернет ошибку,
+	// но переменные могут быть в самой системе, поэтому ошибку логируем, но не падаем.
+	if err := godotenv.Load("../../.env"); err != nil {
+		// Если нужно жестко требовать .env, можно раскомментировать строку ниже:
+		// return Config{}, fmt.Errorf("ошибка загрузки .env файла: %w", err)
+	}
+
+	cfg := Config{
+		DBHost:     os.Getenv("DB_HOST"),
+		DBPort:     os.Getenv("DB_PORT"),
+		DBUser:     os.Getenv("DB_USER"),
+		DBPassword: os.Getenv("DB_PASSWORD"),
+		DBName:     os.Getenv("DB_NAME"),
+		TgBotToken: os.Getenv("TG_BOT_TOKEN"),
+	}
+
+	// Минимальная валидация критических полей
+	if cfg.DBHost == "" || cfg.DBUser == "" || cfg.DBName == "" {
+		return Config{}, fmt.Errorf("пропущены обязательные настройки базы данных в окружении")
+	}
+	// if cfg.TgBotToken == "" {
+	// 	return Config{}, fmt.Errorf("пропущен токен Telegram-бота (TG_BOT_TOKEN)")
+	// }
+
+	return cfg, nil
+}
+--- FILE: ./internal/delivery/httpapi/booking_handler.go ---
+package httpapi
+
+import (
+	"backend/internal/models"
+	"backend/internal/repositories"
+	"backend/internal/services"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+)
+
+func GetClientIDFromContext(ctx context.Context) (int64, error) {
+    tgID, ok := ctx.Value(TgIDKey).(int64)
+    if !ok {
+        return 0, fmt.Errorf("telegram ID not found in context")
+    }
+    return tgID, nil
+}
+
+type BookingHandler struct {
+    masterRepo  repositories.MasterRepository
+    serviceRepo repositories.ServiceRepository
+    slotRepo    repositories.SlotRepository
+    bookingServ *services.BookingService
+}
+
+
+func NewBookingHandler(
+    masterRepo repositories.MasterRepository,
+    serviceRepo repositories.ServiceRepository,
+    slotRepo repositories.SlotRepository,
+    bookingServ *services.BookingService,
+) *BookingHandler {
+    return &BookingHandler{
+        masterRepo:  masterRepo,
+        serviceRepo: serviceRepo,
+        slotRepo:    slotRepo,
+        bookingServ: bookingServ,
+    }
+}
+
+func (h *BookingHandler) GetServices(w http.ResponseWriter, r *http.Request) {
+    inviteLink := chi.URLParam(r, "invite_link")
+    if inviteLink == "" {
+        http.Error(w, "bad request: missing invite link", http.StatusBadRequest)
+        return
+    }
+
+    master, err := h.masterRepo.GetMasterByInviteLink(r.Context(), inviteLink)
+    if err != nil {
+        http.Error(w, "master not found", http.StatusNotFound)
+        return
+    }
+
+    serviceList, err := h.serviceRepo.GetServicesByMasterID(r.Context(), master.ID)
+    if err != nil {
+        http.Error(w, "failed to fetch services", http.StatusInternalServerError)
+        return
+    }
+    
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(serviceList)
+}
+
+func (h *BookingHandler) GetSlots(w http.ResponseWriter, r *http.Request) {
+    inviteLink := chi.URLParam(r, "invite_link")
+    dateStr := r.URL.Query().Get("date")
+
+    if inviteLink == "" || dateStr == "" {
+        http.Error(w, "bad request: missing parameters", http.StatusBadRequest)
+        return
+    }
+
+    targetDate, err := time.Parse("2006-01-02", dateStr)
+    if err != nil {
+        http.Error(w, "bad request: invalid date format, use YYYY-MM-DD", http.StatusBadRequest)
+        return
+    }
+
+    master, err := h.masterRepo.GetMasterByInviteLink(r.Context(), inviteLink)
+    if err != nil {
+        http.Error(w, "master not found", http.StatusNotFound)
+        return
+    }
+
+    slotsList, err := h.slotRepo.GetSlotsByMasterAndDate(r.Context(), master.ID, targetDate)
+    if err != nil {
+        http.Error(w, "failed to fetch slots", http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(slotsList)
+}
+
+type BookRequest struct {
+    SlotID    int64  `json:"slot_id"`
+    ServiceID int64  `json:"service_id"`
+    Name      string `json:"name"`
+    Price     int    `json:"price"`
+}
+
+func (h *BookingHandler) BookSlot(w http.ResponseWriter, r *http.Request) {
+    tgID, err := GetClientIDFromContext(r.Context())
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusUnauthorized)
+        return
+    }
+
+    var req BookRequest
+    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+        http.Error(w, "bad request: invalid JSON body", http.StatusBadRequest)
+        return
+    }
+
+    if req.SlotID == 0 || req.ServiceID == 0 || req.Name == "" {
+        http.Error(w, "bad request: missing required fields", http.StatusBadRequest)
+        return
+    }
+
+    err = h.bookingServ.BookSlot(r.Context(), req.SlotID, req.ServiceID, tgID, req.Name, req.Price)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+        return
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    w.Write([]byte(`{"status":"success","message":"slot booked successfully"}`))
+}
+
+
+
+func (h *BookingHandler) GetInfoMaster(w http.ResponseWriter, r *http.Request) (models.Master, error) {
+    inviteLink := chi.URLParam(r, "invite_link")
+    if inviteLink == "" {
+        http.Error(w, "bad request: missing invite link", http.StatusBadRequest)
+    }
+    master, err := h.masterRepo.GetMasterByInviteLink(r.Context(), inviteLink)
+    if err != nil {
+        http.Error(w, "master not found", http.StatusNotFound)
+   
+    }
+
+    return master, err
+}--- FILE: ./internal/delivery/httpapi/router.go ---
+package httpapi
+
+import (
+	// "backend/pkg/telegram"
+	"context"
+	"net/http"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/rs/cors"
+)
+
+// Кастомный тип для ключа, чтобы безопасно работать с контекстом запроса
+type contextKey string
+
+const TgIDKey contextKey = "tg_id"
+
+// AuthMiddleware — перехватывает заголовок, проверяет его и кладёт Telegram ID в контекст
+// func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
+// 	return func(next http.Handler) http.Handler {
+// 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// 			// 1. Достаем заголовок X-Telegram-Init-Data из HTTP-запроса
+// 			initData := r.Header.Get("X-Telegram-Init-Data")
+// 			if initData == "" {
+// 				http.Error(w, "Unauthorized: Missing Telegram Init Data", http.StatusUnauthorized)
+// 				return
+// 			}
+
+//             tgID, err := telegram.ValidateInitData(initData, tgBotToken)
+//             if err != nil {
+//                 http.Error(w, "Unauthorized: Invalid Signature", http.StatusUnauthorized)
+//                 return
+//             }
+
+// 			// 3. Создаем новый контекст на основе старого и кладем туда наш Telegram ID
+// 			ctx := context.WithValue(r.Context(), TgIDKey, tgID)
+
+// 			// 4. Пропускаем запрос дальше по цепочке, передавая обновленный контекст
+// 			next.ServeHTTP(w, r.WithContext(ctx))
+// 		})
+// 	}
+// }
+
+func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
+    return func(next http.Handler) http.Handler {
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            initData := r.Header.Get("X-Telegram-Init-Data")
+            if initData == "" {
+                http.Error(w, "Unauthorized", http.StatusUnauthorized)
+                return
+            }
+
+            // ВРЕМЕННО ДЛЯ ПОСТМАНА:
+            var tgID int64
+            if initData == "test-vasya" {
+                tgID = 777111222
+            } else {
+                http.Error(w, "Unauthorized", http.StatusUnauthorized)
+                return
+            }
+
+            // РЕАЛЬНУЮ КРИПТУ ВОТ ТУТ ВРЕМЕННО ОТКЛЮЧИ:
+            /*
+            tgID, err := telegram.ValidateInitData(initData, tgBotToken)
+            if err != nil {
+                http.Error(w, "Unauthorized: Invalid Signature", http.StatusUnauthorized)
+                return
+            }
+            */
+            // И исправь имя переменной ниже с err на обычное присвоение, если компилятор ругается.
+            ctx := context.WithValue(r.Context(), TgIDKey, tgID)
+            next.ServeHTTP(w, r.WithContext(ctx))
+        })
+    }
+}
+
+func NewRouter(handler *BookingHandler, tgBotToken string) *chi.Mux {
+	r := chi.NewRouter()
+
+
+
+    corsHandler := cors.New(cors.Options{
+        AllowedOrigins: []string{
+            "http://localhost:5173", 
+			"http://127.0.0.1:5173",
+        },
+        AllowedMethods: []string{
+            http.MethodGet,
+			http.MethodPost,
+			http.MethodPut,
+			http.MethodDelete,
+			http.MethodOptions,
+        },
+        AllowedHeaders: []string{
+            "Origin",
+			"Accept",
+			"Content-Type",
+			"X-Requested-With",
+			"X-Telegram-Init-Data",
+        },
+        AllowCredentials: true,
+        Debug: false,
+    })
+
+
+    r.Use(corsHandler.Handler)
+
+	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
+
+	// Группа эндпоинтов V1 (для чистоты архитектуры)
+	r.Route("/api/v1", func(v1 chi.Router) {
+
+		// Публичные маршруты (доступны без авторизации через ТГ)
+		v1.Get("/master/{invite_link}/services", handler.GetServices)
+		v1.Get("/master/{invite_link}/slots", handler.GetSlots)
+
+		// Защищенные маршруты (требуют заголовок X-Telegram-Init-Data)
+		v1.Group(func(protected chi.Router) {
+			protected.Use(AuthMiddleware(tgBotToken))
+
+			protected.Post("/book", handler.BookSlot)
+		})
+	})
+
+	return r
+}
+--- FILE: ./internal/models/booking.go ---
+package models
+
+import "time"
+
+// Константы для статусов записи
+const (
+	BookingStatusActive            = "active"              // Создана, ждет времени сеанса
+	BookingStatusConfirmed         = "confirmed"           // Подтверждена клиентом (например, за 2 часа до начала)
+	BookingStatusCancelledNoShow   = "cancelled_no_show"   // Авто-отмена (клиент не подтвердил вовремя или не пришел)
+	BookingStatusCancelledByClient = "cancelled_by_client" // Клиент отменил запись вручную
+	BookingStatusCompleted         = "completed"           // Сеанс успешно завершен, мастер выполнил работу
+)
+
+// Booking описывает факт записи клиента на конкретную услугу и время
+type Booking struct {
+	ID               int64     `json:"id"`
+	SlotID           int64     `json:"slot_id"`            // Внешний ключ на Slot (Связь 1-к-1)
+	ServiceID        int64     `json:"service_id"`         // Внешний ключ на Service
+	MasterID         int64     `json:"master_id"`
+	ClientTelegramID int64     `json:"client_telegram_id"` // ID клиента в Telegram
+	ClientName       string    `json:"client_name"`        // Имя клиента из Telegram
+	PriceLocked      int       `json:"price_locked"`       // Фиксация цены на момент записи (в целых числах)
+	Status           string    `json:"status"`             // active, confirmed, cancelled_..., completed
+
+	StartTime        time.Time `json:"start_time"`       
+	EndTime          time.Time `json:"end_time"`         
+	
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// Тестовая функция для демонстрации созданной записи
+func GetTestBooking(slotID, serviceID int64) Booking {
+	return Booking{
+		ID:               1,
+		SlotID:           slotID,
+		ServiceID:        serviceID,
+		ClientTelegramID: 987654321,
+		ClientName:       "Алексей",
+		PriceLocked:      1500, 
+		Status:           BookingStatusActive,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+	}
+}
+--- FILE: ./internal/models/client.go ---
+package models
+
+import "time"
+
+// Client описывает пользователя (клиента), который записывается на услуги через Telegram
+type Client struct {
+	TelegramID   int64     `json:"telegram_id"` // Идентификатор Telegram (PRIMARY KEY)
+	Username     string    `json:"username"`    // @никнейм клиента
+	FirstName    string    `json:"first_name"`   // Имя из Telegram
+	LastName     string    `json:"last_name"`    // Фамилия из Telegram
+	StrikesCount int       `json:"strikes_count"` // Количество нарушений (не подтвердил запись вовремя)
+	IsBanned     bool      `json:"is_banned"`    // Флаг блокировки (при StrikesCount >= 3)
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// Тестовая функция для демонстрации структуры клиента
+func GetTestClient() Client {
+	return Client{
+		TelegramID:   987654321,
+		Username:     "alex_barber_client",
+		FirstName:    "Алексей",
+		LastName:     "Петров",
+		StrikesCount: 0,
+		IsBanned:     false,
+		CreatedAt:    time.Now(),
+	}
+}
+--- FILE: ./internal/models/master.go ---
+package models
+
+import "time"
+
+// WorkHours описывает график работы мастера из UI
+type WorkHours struct {
+	WorkingDays []string `json:"working_days"` // ["Пн", "Вт", "Ср", "Чт", "Пт"]
+	StartDay    string   `json:"start_day"`    // "09:00"
+	EndDay      string   `json:"end_day"`      // "20:00"
+	BreakStart  string   `json:"break_start"`  // "13:00"
+	BreakEnd    string   `json:"break_end"`    // "14:00"
+}
+
+// MasterSettings описывает правила записи и автоматизации
+type MasterSettings struct {
+	AutoCancel        bool `json:"auto_cancel"`         // Авто-отмена без подтверждения
+	CancelBeforeHours int  `json:"cancel_before_hours"` // 1, 2, 4 часа
+	UseWaitlist       bool `json:"use_waitlist"`        // Предлагать окно в лист ожидания
+}
+
+// Master — основное ядро системы
+type Master struct {
+	ID         int64          `json:"id"`
+	TelegramID int64          `json:"telegram_id"` // Уникальный индекс в БД
+	Name       string         `json:"name"`        // "Педро Барбер"
+	Bio        string         `json:"bio"`         // "Барбер · 6 лет опыта"
+	Address    string         `json:"address"`     // "ул. Центральная, 1"
+	InviteLink string         `json:"invite_link"` // "2hq0og3k"
+	WorkHours  WorkHours      `json:"work_hours"`  // В БД будет сохраняться как JSONB
+	Settings   MasterSettings `json:"settings"`    // В БД будет сохраняться как JSONB
+	CreatedAt  time.Time      `json:"created_at"`
+	UpdatedAt  time.Time      `json:"updated_at"`
+}
+
+// Тестовая функция для проверки создания объекта
+func Get() Master {
+	return Master{
+		ID:         1,
+		TelegramID: 12345678910,
+		Name:       "Педро Барбер",
+		Bio:        "Барбер · 6 лет опыта",
+		Address:    "ул. Центральная, 1",
+		InviteLink: "2hq0og3k",
+		WorkHours: WorkHours{
+			WorkingDays: []string{"Пн", "Вт", "Ср", "Чт", "Пт"},
+			StartDay:    "09:00",
+			EndDay:      "20:00",
+			BreakStart:  "13:00",
+			BreakEnd:    "14:00",
+		},
+		Settings: MasterSettings{
+			AutoCancel:        true,
+			CancelBeforeHours: 2,
+			UseWaitlist:       true,
+		},
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+}
+--- FILE: ./internal/models/service.go ---
+package models
+
+import "time"
+
+// Service описывает услугу, которую предоставляет мастер
+type Service struct {
+	ID          int64     `json:"id"`
+	MasterID    int64     `json:"master_id"`    // Внешний ключ на Master
+	Name        string    `json:"name"`         // "Мужская стрижка"
+	DurationMin int       `json:"duration_min"` // Длительность в минутах (например, 45)
+	Price       int       `json:"price"`        // Цена в целых числах (например, 1500)
+	Description string    `json:"description"`  // Опциональное описание услуги
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// Тестовая функция для создания списка услуг 
+func GetTestServices(masterID int64) []Service {
+	return []Service{
+		{
+			ID:          1,
+			MasterID:    masterID,
+			Name:        "Мужская стрижка",
+			DurationMin: 45,
+			Price:       1500,
+			Description: "Классическая стрижка ножницами и машинкой",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		},
+		{
+			ID:          2,
+			MasterID:    masterID,
+			Name:        "Стрижка машинкой",
+			DurationMin: 20,
+			Price:       800,
+			Description: "Быстрая стрижка под одну или несколько насадок",
+			CreatedAt:   time.Now(),
+			UpdatedAt:   time.Now(),
+		},
+	}
+}
+--- FILE: ./internal/models/slot.go ---
+package models
+
+import "time"
+
+// Константы для статусов слота (вместо сырых строк)
+const (
+	SlotStatusFree    = "free"    // Свободен для записи
+	SlotStatusBooked  = "booked"  // Забронирован и подтвержден
+	SlotStatusPending = "pending" // Клиент выбрал время, но еще не подтвердил (бронь держится Х минут)
+	SlotStatusBlocked = "blocked" // Перерыв, обед или ручная блокировка мастером
+)
+
+// Slot описывает конкретный отрезок времени в расписании мастера
+type Slot struct {
+	ID        int64     `json:"id"`
+	MasterID  int64     `json:"master_id"`  // Внешний ключ на Master
+	StartTime time.Time `json:"start_time"` // Когда начинается слот (например, 2026-11-15 15:00:00 +03:00)
+	EndTime   time.Time `json:"end_time"`   // Когда заканчивается (StartTime + DurationMin)
+	Status    string    `json:"status"`     // free, booked, pending, blocked
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Тестовая функция для демонстрации сетки слотов
+func GetTestSlots(masterID int64) []Slot {
+	baseTime := time.Date(2026, 11, 15, 15, 0, 0, 0, time.Local) // 15 ноября 15:00
+
+	return []Slot{
+		{
+			ID:        1,
+			MasterID:  masterID,
+			StartTime: baseTime,
+			EndTime:   baseTime.Add(45 * time.Minute), // 15:45
+			Status:    SlotStatusFree,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+		{
+			ID:        2,
+			MasterID:  masterID,
+			StartTime: baseTime.Add(45 * time.Minute), // 15:45
+			EndTime:   baseTime.Add(65 * time.Minute), // 16:05 (например, под быструю стрижку 20 мин)
+			Status:    SlotStatusPending,
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		},
+	}
+}
+--- FILE: ./internal/models/waitlist.go ---
+package models
+
+import "time"
+
+// Константы для статусов листа ожидания
+const (
+	WaitlistStatusWaiting   = "waiting"   // Клиент просто ждет в очереди (по принципу FIFO)
+	WaitlistStatusOffered   = "offered"   // Бот нашел окно и предложил его клиенту (таймаут 10 минут)
+	WaitlistStatusFulfilled = "fulfilled" // Клиент успешно согласился и записался (создан Booking)
+	WaitlistStatusExpired   = "expired"   // Клиент не ответил за 10 минут, очередь перешла к следующему
+)
+
+// WaitlistRequest описывает заявку клиента на поиск свободного окна
+type WaitlistRequest struct {
+	ID               int64     `json:"id"`
+	MasterID         int64     `json:"master_id"`          // Внешний ключ на Master
+	ClientTelegramID int64     `json:"client_telegram_id"` // Кто ждет
+	DesiredDate      time.Time `json:"desired_date"`       // Желаемая дата (время обнулено до 00:00:00)
+	Status           string    `json:"status"`             // waiting, offered, fulfilled, expired
+	OfferedSlotID    *int64    `json:"offered_slot_id"`    // Указатель на ID слота (может быть nil/null)
+	CreatedAt        time.Time `json:"created_at"`         // Приоритет очереди: кто раньше встал, тот первый в списке
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+--- FILE: ./internal/repositories/booking_repo.go ---
+package repositories
+
+import (
+	"backend/internal/models"
+	"context"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type BookingRepository interface {
+	CreateBooking(ctx context.Context, tx pgx.Tx, booking models.Booking) error
+	GetBookingBySlotID(ctx context.Context, slotID int64) (models.Booking, error)
+}
+
+type BookingRepo struct {
+	db *pgxpool.Pool
+}
+
+func NewBookingRepo(db *pgxpool.Pool) *BookingRepo {
+	return &BookingRepo{
+		db: db,
+	}
+}
+
+// Метод создания бронирования (остался без изменений)
+func (b *BookingRepo) CreateBooking(ctx context.Context, tx pgx.Tx, booking models.Booking) error {
+    query := `INSERT INTO bookings 
+        (slot_id, service_id, client_telegram_id, client_name, price_locked, status) 
+        VALUES ($1, $2, $3, $4, $5, $6)`
+    
+    _, err := tx.Exec(ctx, query, 
+        booking.SlotID, 
+        booking.ServiceID, 
+        booking.ClientTelegramID, 
+        booking.ClientName,    
+        booking.PriceLocked,  
+        booking.Status,
+    )
+    return err
+}
+
+// 2. ИСПРАВЛЕНО: Добавлен недостающий метод, который требовал компилятор
+func (b *BookingRepo) GetBookingBySlotID(ctx context.Context, slotID int64) (models.Booking, error) {
+	var booking models.Booking
+
+	query := `
+		SELECT id, slot_id, service_id, client_telegram_id, status, created_at 
+		FROM bookings 
+		WHERE slot_id = $1
+	`
+
+	// Используем b.db (наш пул), так как этот запрос идет вне транзакции создания
+	err := b.db.QueryRow(ctx, query, slotID).Scan(
+		&booking.ID,
+		&booking.SlotID,
+		&booking.ServiceID,
+		&booking.ClientTelegramID, // Проверьте, что в models.Booking поле называется именно так
+		&booking.Status,
+		&booking.CreatedAt,
+	)
+
+	return booking, err
+}
+--- FILE: ./internal/repositories/client_repo.go ---
+package repositories
+
+import (
+	"backend/internal/models"
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type ClientRepository interface {
+	GetOrCreateClient(ctx context.Context, telegramID int64, username string, firstName string) (models.Client, error)
+	GetClientByTelegramID(ctx context.Context, telegramID int64) (models.Client, error)
+}
+
+type ClientRepo struct {
+	db *pgxpool.Pool
+}
+
+func NewClientRepo(db *pgxpool.Pool) *ClientRepo {
+	return &ClientRepo{
+		db: db,
+	}
+}
+
+func (c *ClientRepo) GetOrCreateClient(ctx context.Context, telegramID int64, username string, firstName string) (models.Client, error) {
+	var client models.Client
+
+	query := `
+	INSERT INTO clients (telegram_id, username, first_name) 
+	VALUES ($1, $2, $3)
+	ON CONFLICT (telegram_id) 
+	DO UPDATE SET username = EXCLUDED.username, first_name = EXCLUDED.first_name
+	RETURNING telegram_id, username, first_name, last_name, strikes_count, is_banned, created_at;
+`
+	err := c.db.QueryRow(ctx, query, telegramID, username, firstName).Scan(
+		&client.TelegramID,
+		&client.Username,
+		&client.FirstName,
+		&client.LastName,
+		&client.StrikesCount,
+		&client.IsBanned,
+		&client.CreatedAt,
+	)
+
+	return client, err
+}
+
+func (c *ClientRepo) GetClientByTelegramID(ctx context.Context, telegramID int64) (models.Client, error) {
+	var client models.Client
+
+	query := `SELECT telegram_id, username, first_name, last_name, strikes_count, is_banned, created_at 
+FROM clients 
+WHERE telegram_id = $1`
+
+	err := c.db.QueryRow(ctx, query, telegramID).Scan(
+		&client.TelegramID,
+		&client.Username,
+		&client.FirstName,
+		&client.LastName,
+		&client.StrikesCount,
+		&client.IsBanned,
+		&client.CreatedAt,
+	)
+	if err != nil {
+		// Если строк не найдено, возвращаем пустую структуру и понятную ошибку
+		if err == pgx.ErrNoRows {
+			return models.Client{}, fmt.Errorf("client with telegram ID %d not found", telegramID)
+		}
+		// Если упало по другой причине (например, отвалилась база), возвращаем сырую ошибку
+		return models.Client{}, err
+	}
+
+	return client, nil
+}
+--- FILE: ./internal/repositories/master_repo.go ---
+package repositories
+
+import (
+	"backend/internal/models"
+	"context"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type MasterRepository interface {
+	CreateMaster(ctx context.Context, master models.Master) error
+	GetMasterByInviteLink(ctx context.Context, link string) (models.Master, error)
+}
+
+type MasterRepo struct {
+	db *pgxpool.Pool
+}
+
+func NewMasterRepo(db *pgxpool.Pool) *MasterRepo {
+	return &MasterRepo{
+		db: db,
+	}
+}
+
+func (m *MasterRepo) CreateMaster(ctx context.Context, master models.Master) error {
+	_, err := m.db.Exec(ctx, "INSERT INTO masters (telegram_id, name, bio, address, invite_link) VALUES ($1, $2, $3, $4, $5)", master.TelegramID, master.Name, master.Bio, master.Address, master.InviteLink)
+	return err
+}
+
+func (m *MasterRepo) GetMasterByInviteLink(ctx context.Context, link string) (models.Master, error) {
+	var master models.Master
+	err := m.db.QueryRow(ctx, "SELECT id, telegram_id, name, bio, address, invite_link FROM masters WHERE invite_link = $1", link).Scan(&master.ID, &master.TelegramID, &master.Name, &master.Bio, &master.Address, &master.InviteLink)
+	return master, err
+}
+--- FILE: ./internal/repositories/service_repo.go ---
+package repositories
+
+import (
+	"backend/internal/models"
+	"context"
+	"log"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type ServiceRepository interface {
+	CreateService(ctx context.Context, service models.Service) error
+	GetServicesByMasterID(ctx context.Context, masterID int64) ([]models.Service, error)
+}
+
+type ServiceRepo struct {
+	db *pgxpool.Pool
+}
+
+func NewServiceRepo(db *pgxpool.Pool) *ServiceRepo {
+	return &ServiceRepo{
+		db: db,
+	}
+}
+
+func (s *ServiceRepo) CreateService(ctx context.Context, service models.Service) error {
+	_, err := s.db.Exec(ctx, "INSERT INTO services (master_id, name, duration_min, price) VALUES ($1, $2, $3, $4)", service.MasterID, service.Name, service.DurationMin, service.Price)
+	return err
+}
+
+func (s *ServiceRepo) GetServicesByMasterID(ctx context.Context, masterID int64) ([]models.Service, error){
+	rows, err := s.db.Query(ctx, "SELECT id, master_id, name, duration_min, price FROM services WHERE master_id = $1", masterID)
+
+	var services []models.Service
+
+	for rows.Next() {
+		var s models.Service
+		err := rows.Scan(&s.ID, &s.MasterID, &s.Name, &s.DurationMin, &s.Price)
+		if err != nil {
+			log.Println("Ошибка:", err)
+		}
+
+		services = append(services, s)
+	}
+	defer rows.Close()
+	return services, err
+}
+--- FILE: ./internal/repositories/slot_repo.go ---
+package repositories
+
+import (
+	"backend/internal/models"
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+
+type SlotRepository interface {
+	CreateSlot(ctx context.Context, slot models.Slot) error
+	GetSlotsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Slot, error)
+	UpdateSlotStatus(ctx context.Context, tx pgx.Tx, slotID int64, status string) error
+    GetSlotByID(ctx context.Context, tx pgx.Tx, slotID int64) (models.Slot, error)
+
+}
+
+
+type SlotRepo struct {
+	db *pgxpool.Pool
+}
+
+func NewSlotRepo(db *pgxpool.Pool) *SlotRepo{
+	return &SlotRepo{
+		db: db,
+	}
+}
+
+
+func (s *SlotRepo)CreateSlot(ctx context.Context, slot models.Slot) error  {
+	_, err := s.db.Exec(ctx, "INSERT INTO slots (master_id, start_time, end_time, status) VALUES ($1, $2, $3, $4)", slot.MasterID, slot.StartTime, slot.EndTime, slot.Status)
+	return err
+}
+
+func (s *SlotRepo) GetSlotsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Slot, error) {
+    // Нам нужен диапазон: от начала переданного дня (00:00:00) до конца (23:59:59)
+    startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+    endOfDay := startOfDay.Add(24 * time.Hour)
+
+    rows, err := s.db.Query(ctx, 
+        "SELECT id, master_id, start_time, end_time, status FROM slots WHERE master_id = $1 AND start_time >= $2 AND start_time < $3", 
+        masterID, startOfDay, endOfDay,
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    var slots []models.Slot
+    for rows.Next() {
+        var s models.Slot
+        if err := rows.Scan(&s.ID, &s.MasterID, &s.StartTime, &s.EndTime, &s.Status); err != nil {
+            return nil, err
+        }
+        slots = append(slots, s)
+    }
+
+    if err = rows.Err(); err != nil {
+        return nil, err
+    }
+
+    return slots, nil
+}
+
+
+func (s *SlotRepo) GetSlotByID(ctx context.Context, tx pgx.Tx, slotID int64) (models.Slot, error) {
+    var slot models.Slot
+    
+    // Обрати внимание на FOR UPDATE в конце запроса!
+    query := "SELECT id, master_id, start_time, end_time, status FROM slots WHERE id = $1 FOR UPDATE"
+    
+    err := tx.QueryRow(ctx, query, slotID).Scan(
+        &slot.ID, &slot.MasterID, &slot.StartTime, &slot.EndTime, &slot.Status,
+    )
+    
+    return slot, err
+}
+
+func (s *SlotRepo) UpdateSlotStatus(ctx context.Context, tx pgx.Tx, slotID int64, status string) error {
+    _, err := tx.Exec(ctx, "UPDATE slots SET status = $1 WHERE id = $2", status, slotID)
+    return err
+}--- FILE: ./internal/repositories/waitlist_repo.go ---
+package repositories
+
+import (
+	"backend/internal/models"
+	"context"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type WaitlistRepository interface {
+	AddToWaitlist(ctx context.Context, tx pgx.Tx, masterID int64, clientTgID int64, desiredDate time.Time) error
+	GetFirstInWaitlist(ctx context.Context, masterID int64, desiredDate time.Time) (models.WaitlistRequest, error)
+	UpdateWaitlistStatus(ctx context.Context, tx pgx.Tx, id int64, status string, slotID int64) error
+}
+
+type WaitlistRepo struct {
+	db *pgxpool.Pool
+}
+
+func NewWaitlistRepo(db *pgxpool.Pool) *WaitlistRepo {
+	return &WaitlistRepo{db: db}
+}
+
+func (w *WaitlistRepo) AddToWaitlist(ctx context.Context, tx pgx.Tx, masterID int64, clientTgID int64, desiredDate time.Time) error {
+	query := `INSERT INTO waitlist (master_id, client_telegram_id, desired_date, status) 
+	VALUES ($1, $2, $3, 'waiting')`
+
+	_, err := tx.Exec(ctx, query, masterID, clientTgID, desiredDate.Format("2006-01-02"))
+	return err
+}
+
+func (w *WaitlistRepo) GetFirstInWaitlist(ctx context.Context, masterID int64, date time.Time) (models.WaitlistRequest, error) {
+
+	var req models.WaitlistRequest
+
+	query := `SELECT id, master_id, client_telegram_id, desired_date, status, offered_slot_id, created_at, updated_at 
+FROM waitlist
+WHERE master_id = $1 AND desired_date = $2 AND status = 'waiting'
+ORDER BY created_at ASC 
+LIMIT 1;
+`
+
+	err := w.db.QueryRow(ctx, query, masterID, date.Format("2006-01-02")).Scan(
+		&req.ID,
+		&req.MasterID,
+		&req.ClientTelegramID,
+		&req.DesiredDate,
+		&req.Status,
+		&req.OfferedSlotID,
+		&req.CreatedAt,
+		&req.UpdatedAt,
+	)
+
+	return req, err
+
+}
+
+func (w *WaitlistRepo) UpdateWaitlistStatus(ctx context.Context, tx pgx.Tx, id int64, status string, slotID int64) error {
+
+	query := `UPDATE waitlist 
+	SET status = $1, offered_slot_id = $2, updated_at = NOW() 
+	WHERE id = $3`
+	
+
+	_, err := tx.Exec(ctx, query, status, slotID, id)
+	return err
+}
+--- FILE: ./internal/services/booking_service.go ---
+package services
+
+import (
+	"backend/internal/models"
+	"backend/internal/repositories"
+	"context"
+	"errors"
+	"log"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type BookingService struct {
+	pool        *pgxpool.Pool
+	slotRepo    repositories.SlotRepository
+	bookingRepo repositories.BookingRepository
+}
+
+func NewBookingService(pool *pgxpool.Pool, slotRepo repositories.SlotRepository, bookingRepo repositories.BookingRepository) *BookingService {
+	return &BookingService{
+		pool:        pool,
+		slotRepo:    slotRepo,
+		bookingRepo: bookingRepo,
+	}
+}
+
+func (s *BookingService) BookSlot(ctx context.Context, slotID int64, serviceID int64, clientTelegramID int64, clientName string, priceLocked int) error {
+	tx, err := s.pool.Begin(ctx)
+
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		if err != nil {
+			log.Println("Откат транзакции из-за ошибки:", err)
+			tx.Rollback(ctx)
+		}
+	}()
+
+	slot, err := s.slotRepo.GetSlotByID(ctx, tx, slotID)
+	if err != nil {
+		return err
+	}
+
+	if slot.Status != "free" {
+		err = errors.New("слот уже занят")
+		return err
+	}
+
+	err = s.slotRepo.UpdateSlotStatus(ctx, tx, slotID, "booked")
+	if err != nil {
+		return err
+	}
+
+	newBooking := models.Booking{
+		SlotID:           slotID,
+		ServiceID:        serviceID,
+		ClientTelegramID: clientTelegramID,
+		ClientName:       clientName,  // Добавили
+		PriceLocked:      priceLocked, // Добавили
+		Status:           "active",
+	}
+	err = s.bookingRepo.CreateBooking(ctx, tx, newBooking)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return err
+	}
+
+	log.Println("Клиент успешно записан!")
+	return nil
+}
+--- FILE: ./internal/services/slot_service.go ---
+// services/slot_service.go
+package services
+
+import (
+	"backend/internal/repositories"
+	"time"
+)
+
+// Slot - DTO для ответа фронтенду
+type Slot struct {
+	StartTime time.Time `json:"start_time"`
+	Status    string    `json:"status"` // "free" или "booked"
+}
+
+type SlotService struct {
+	MasterRepo  repositories.MasterRepository
+	ServiceRepo repositories.ServiceRepository
+	BookingRepo repositories.BookingRepository
+}
+
+func NewSlotService(mRepo repositories.MasterRepository, sRepo repositories.ServiceRepository, bRepo repositories.BookingRepository) *SlotService {
+	return &SlotService{MasterRepo: mRepo, ServiceRepo: sRepo, BookingRepo: bRepo}
+}
+
+func (s *SlotService) GetAvailableSlots(inviteLink string, date time.Time, serviceID int64) ([]Slot, error) {
+	// 1. Получаем мастера по invite_link
+	master, err := s.MasterRepo.GetMasterByInviteLink(inviteLink)
+	if err != nil {
+		return nil, err 
+	}
+
+	// 2. Получаем услугу и проверяем, принадлежит ли она этому мастеру
+	service, err := s.ServiceRepo.GetServicesByMasterID(serviceID)
+	if err != nil || service.MasterID != master.ID {
+		return nil, err // Услуга не найдена или чужая
+	}
+
+	// 3. Проверяем, работает ли мастер в этот день недели
+	dayName := getRussianWeekday(date.Weekday())
+	isWorkingDay := false
+	for _, d := range master.WorkHours.WorkingDays {
+		if d == dayName {
+			isWorkingDay = true
+			break
+		}
+	}
+	
+	// Если выходной — возвращаем пустой массив, фронтенд поймет, что записи нет
+	if !isWorkingDay {
+		return []Slot{}, nil 
+	}
+
+	// 4. Достаем АКТИВНЫЕ записи мастера на эту дату
+	bookings, err := s.BookingRepo.GetByMasterAndDate(master.ID, date)
+	if err != nil {
+		return nil, err
+	}
+
+	// 5. Генерируем виртуальные слоты
+	return generateVirtualSlots(master, service, bookings, date), nil
+}
+
+// generateVirtualSlots - ядро алгоритма
+func generateVirtualSlots(master models.Master, service models.Service, bookings []models.Booking, date time.Time) []Slot {
+	var slots []Slot
+
+	// Парсим строки времени и привязываем к запрошенной дате (в часовом поясе UTC для корректного JSON)
+	workStart := parseTimeOnDate(date, master.WorkHours.StartDay)
+	workEnd := parseTimeOnDate(date, master.WorkHours.EndDay)
+	breakStart := parseTimeOnDate(date, master.WorkHours.BreakStart)
+	breakEnd := parseTimeOnDate(date, master.WorkHours.BreakEnd)
+
+	step := 30 * time.Minute
+	serviceDuration := time.Duration(service.DurationMin) * time.Minute
+
+	// Цикл идет до тех пор, пока (время_начала + длительность_услуги) <= конец_рабочего_дня
+	for current := workStart; current.Add(serviceDuration).Before(workEnd) || current.Add(serviceDuration).Equal(workEnd); current = current.Add(step) {
+		slotEnd := current.Add(serviceDuration)
+		status := "free"
+
+		// Проверка 1: Попадает ли слот на обед?
+		if master.WorkHours.BreakStart != "" && master.WorkHours.BreakEnd != "" {
+			if isIntersecting(current, slotEnd, breakStart, breakEnd) {
+				status = "booked"
+			}
+		}
+
+		// Проверка 2: Пересекается ли слот с уже занятыми записями?
+		if status == "free" {
+			for _, booking := range bookings {
+				// Игнорируем отмененные записи (хотя лучше фильтровать их еще на уровне SQL)
+				if booking.Status == models.BookingStatusCancelledByClient || booking.Status == models.BookingStatusCancelledNoShow {
+					continue
+				}
+				
+				if isIntersecting(current, slotEnd, booking.StartTime, booking.EndTime) {
+					status = "booked"
+					break // Пересечение найдено, дальше искать нет смысла
+				}
+			}
+		}
+
+		slots = append(slots, Slot{
+			StartTime: current.UTC(), // Отдаем в UTC, чтобы фронт получил "2026-08-20T10:00:00Z"
+			Status:    status,
+		})
+	}
+
+	return slots
+}
+
+// isIntersecting - математическая проверка пересечения двух интервалов [start1, end1) и [start2, end2)
+// Если начало одного интервала строго меньше конца другого И наоборот -> они пересекаются.
+func isIntersecting(start1, end1, start2, end2 time.Time) bool {
+	return start1.Before(end2) && start2.Before(end1)
+}
+
+func parseTimeOnDate(date time.Time, timeStr string) time.Time {
+	if timeStr == "" {
+		return time.Time{} // Возвращаем нулевое время, если строка пустая
+	}
+	t, _ := time.Parse("15:04", timeStr)
+	return time.Date(date.Year(), date.Month(), date.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
+}
+
+func getRussianWeekday(w time.Weekday) string {
+	days := map[time.Weekday]string{
+		time.Monday: "Пн", time.Tuesday: "Вт", time.Wednesday: "Ср",
+		time.Thursday: "Чт", time.Friday: "Пт", time.Saturday: "Сб", time.Sunday: "Вс",
+	}
+	return days[w]
+}--- FILE: ./internal/services/waitlist_service.go ---
+package services
+
+import (
+	"backend/internal/repositories"
+	"context"
+	"log"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+type WaitlistService struct {
+	pool        *pgxpool.Pool
+	slotRepo    repositories.SlotRepository
+	waitlistRepo repositories.WaitlistRepository
+}
+
+func NewWaitlistService(pool *pgxpool.Pool, slotRepo repositories.SlotRepository, waitlistRepo repositories.WaitlistRepository) *WaitlistService {
+    return &WaitlistService{
+        pool:         pool,
+        slotRepo:     slotRepo,
+        waitlistRepo: waitlistRepo,
+    }
+}
+
+
+
+func (s *WaitlistService) JoinWaitlist(ctx context.Context, masterID, clientTgID int64, desiredDate time.Time) error{
+
+	tx, err := s.pool.Begin(ctx)
+	defer tx.Rollback(ctx)
+
+	err = s.waitlistRepo.AddToWaitlist(ctx, tx, masterID, clientTgID, desiredDate)
+	if err != nil{
+		return err
+	}
+	err = tx.Commit(ctx)
+	return err
+}
+
+func (s *WaitlistService) OfferSlotToFirstInLine(ctx context.Context, masterID, slotID int64, desiredDate time.Time) error{
+
+	req, err := s.waitlistRepo.GetFirstInWaitlist(ctx, masterID, desiredDate)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			log.Println("🤖 Авто-забиватор: Очередь пуста, совпадений по дате нет.")
+			return nil 
+		}
+		// ЭТОТ ЛОГ ПОКАЖЕТ НАМ НАСТОЯЩУЮ ПРИЧИНУ!
+		log.Println("🚨 Критическая ошибка внутри GetFirstInWaitlist:", err)
+		return err 
+	}
+
+
+	tx, err := s.pool.Begin(ctx)
+	defer tx.Rollback(ctx)
+
+	err = s.waitlistRepo.UpdateWaitlistStatus(ctx, tx, req.ID, "offered", slotID)
+	if err != nil {
+		return nil
+	}
+	err = tx.Commit(ctx)
+	// Здесь в будущем я допишем отправку сообщения ботом
+	return err
+}--- FILE: ./pkg/database/postgres.go ---
+package database
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"backend/internal/config" // Внимание: убедитесь, что имя модуля в go.mod совпадает с 'backend'
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// NewPostgres инициализирует пул соединений с базой данных PostgreSQL
+func NewPostgres(cfg config.Config) (*pgxpool.Pool, error) {
+	// Сборка DSN строки подключения
+	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		cfg.DBUser,
+		cfg.DBPassword,
+		cfg.DBHost,
+		cfg.DBPort,
+		cfg.DBName,
+	)
+
+	// Создаем контекст с таймаутом на случай, если база "лежит" и долго не отвечает
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Инициализируем пул соединений (соединение ленивое, физически база еще не проверяется)
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("не удалось создать конфигурацию пула Postgres: %w", err)
+	}
+
+	// Делаем обязательный Ping, чтобы физически проверить доступность СУБД
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close() // Закрываем пул, если подключиться не удалось
+		return nil, fmt.Errorf("ошибка проверки связи (Ping) с PostgreSQL: %w", err)
+	}
+
+	return pool, nil
+}
+--- FILE: ./pkg/telegram/auth.go ---
+package telegram
+
+import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/url"
+	"sort"
+	"strings"
+)
+
+type WebAppUser struct {
+	ID        int64  `json:"id"`
+	FirstName string `json:"first_name"`
+	LastName  string `json:"last_name"`
+	Username  string `json:"username"`
+}
+
+func ValidateInitData(initDate string, botToken string) (int64, error)  {
+	params, err := url.ParseQuery(initDate)
+	if err != nil {
+		return 0, err
+	}
+
+	hash := params.Get("hash")
+	if hash == "" {
+		return 0, errors.New("hash не найден в initData")
+	}
+	params.Del("hash")
+
+	var keys []string
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var dateCheckStrings []string
+	for _, k := range keys {
+		dateCheckStrings = append(dateCheckStrings, fmt.Sprintf("%s=%s", k, params.Get(k)))
+	}
+	dateCheckString := strings.Join(dateCheckStrings, "\n")
+
+	secretKey := hmac.New(sha256.New, []byte("WebAppData"))
+	secretKey.Write([]byte(botToken))
+	secretKeyBytes := secretKey.Sum(nil)
+
+	h := hmac.New(sha256.New, secretKeyBytes)
+	h.Write([]byte(dateCheckString))
+	calculatedHash := hex.EncodeToString(h.Sum(nil))
+
+
+	if calculatedHash != hash {
+		return 0, errors.New("невалидная подпись initData (данные поддельные)")
+	}
+
+	var user WebAppUser
+	userJSON := params.Get("user")
+	if userJSON == "" {
+        return 0, errors.New("user не найден в initData")
+    }
+
+    err = json.Unmarshal([]byte(userJSON), &user)
+    if err != nil {
+        return 0, err
+    }
+
+    return user.ID, nil
+
+}--- FILE: ./server/main.go ---
+package main
+
+import (
+    "backend/internal/config"
+    "backend/internal/delivery/httpapi"
+    "backend/internal/repositories"
+    service "backend/internal/services"
+    "backend/pkg/database"
+    "log"
+    "net/http"
+)
+
+func main() {
+    cfg, err := config.Load()
+    if err != nil {
+        log.Fatalf("Ошибка конфигурации: %v", err)
+    }
+
+    pool, err := database.NewPostgres(cfg)
+    if err != nil {
+        log.Fatalf("Ошибка подключения к БД: %v", err)
+    }
+    defer pool.Close()
+
+    // 3. Репозитории
+    masterRepo := repositories.NewMasterRepo(pool)
+    serviceRepo := repositories.NewServiceRepo(pool)
+    slotRepo := repositories.NewSlotRepo(pool)
+    bookingRepo := repositories.NewBookingRepo(pool)
+    // clientRepo := repositories.NewClientRepo(pool)
+
+    // 4. Сервисы
+    // Убедись, что сигнатура NewBookingService в твоем сервисе совпадает!
+    bookingService := service.NewBookingService(pool, slotRepo, bookingRepo)
+
+    // 5. Хендлеры
+    bookingHandler := httpapi.NewBookingHandler(masterRepo, serviceRepo, slotRepo, bookingService)
+
+    // 6. Роутер
+    router := httpapi.NewRouter(bookingHandler, cfg.TgBotToken)
+
+    // 7. Запуск
+    log.Println("🚀 Сервер запущен на порту 8080. Готов к запросам от фронтенда!")
+    log.Fatal(http.ListenAndServe(":8080", router))
+}

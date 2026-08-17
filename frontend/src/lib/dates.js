@@ -6,6 +6,13 @@ export const MONTHS_GEN = [
   'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 ]
+
+// Короткие названия месяцев для таймера
+export const MONTHS_SHORT = [
+  'янв', 'фев', 'мар', 'апр', 'мая', 'июн',
+  'июл', 'авг', 'сен', 'окт', 'ноя', 'дек',
+]
+
 export const MONTHS_TITLE = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
@@ -57,7 +64,7 @@ export function buildMonthGrid(year, month) {
 const DEMO_PATTERNS = {
   0: ['free', 'busy', 'free', 'pending', 'free'],
   1: ['free', 'free', 'busy', 'free', 'pending'],
-  2: ['busy', 'busy', 'busy', 'busy', 'busy'], // ← демо листа ожидания
+  2: ['busy', 'busy', 'busy', 'busy', 'busy'],
 }
 
 export function getScheduleForDate(date) {
@@ -78,13 +85,18 @@ export function getBookingTimeLabel(target, now = new Date()) {
   if (diff <= 0) return 'Скоро начнётся'
 
   const HOUR = 3600000
+  
+  // Больше 24 часов: "20 авг, 11:00"
   if (diff > 24 * HOUR) {
-    return `${target.getDate()} ${MONTHS_GEN[target.getMonth()]}, ${formatTime(target)}`
+    return `${target.getDate()} ${MONTHS_SHORT[target.getMonth()]}, ${formatTime(target)}`
   }
+  
+  // 3-24 часа: "Сегодня, 11:00"
   if (diff > 3 * HOUR) {
     return `Сегодня, ${formatTime(target)}`
   }
 
+  // Меньше 3 часов: обратный отсчёт
   const h = Math.floor(diff / HOUR)
   const m = Math.floor((diff % HOUR) / 60000)
   return h > 0 ? `Через ${h} ч ${m} мин` : `Через ${m} мин`

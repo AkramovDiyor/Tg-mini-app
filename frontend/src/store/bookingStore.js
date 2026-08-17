@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { toISO, TODAY } from '../lib/dates'
-import { makeMockActiveBooking } from '../mock/makeMockActiveBooking'
 
 export const useBookingStore = create((set) => ({
   service: null,
@@ -8,7 +7,6 @@ export const useBookingStore = create((set) => ({
   myBookings: {},
   waitlist: {},
   toast: null,
-  activeBooking: makeMockActiveBooking(),
 
   pickService: (service) => set({ service, selectedDate: toISO(TODAY) }),
   setDate: (iso) => set({ selectedDate: iso }),
@@ -16,5 +14,4 @@ export const useBookingStore = create((set) => ({
   joinWaitlist: (iso) => set((s) => ({ waitlist: { ...s.waitlist, [iso]: true } })),
   showToast: (text) => set({ toast: { id: Date.now(), text } }),
   hideToast: () => set({ toast: null }),
-  cancelActiveBooking: () => set({ activeBooking: null }),
 }))

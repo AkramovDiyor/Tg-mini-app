@@ -63,3 +63,62 @@ CREATE TABLE IF NOT EXISTS waitlist (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 ALTER TABLE waitlist ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+
+-- 1. Создаем мастера Педро с нормальной ссылкой (без слэшей)
+INSERT INTO masters (telegram_id, name, bio, address, invite_link, work_hours, settings)
+VALUES (9999991, 'Педро Барбер', 'Барбер · 6 лет опыта', 'ул. Центральная, 1', 'LINK1', '{}', '{}')
+ON CONFLICT (telegram_id) DO UPDATE SET invite_link = 'LINK1';
+
+-- 2. Создаем услугу (master_id ищется автоматически по ссылке, чтобы не гадать с цифрами)
+INSERT INTO services (master_id, name, duration_min, price)
+SELECT id, 'Мужская стрижка', 45, 1500 FROM masters WHERE invite_link = 'LINK1';
+
+-- 3. Создаем слот на СЕГОДНЯ в 15:00 (используем NOW(), чтобы не менять даты руками)
+-- Смещение +3 часа для МСК, если что поправь под свой часовой пояс
+INSERT INTO slots (master_id, start_time, end_time, status)
+SELECT id, NOW() + INTERVAL '3 hours', NOW() + INTERVAL '3 hours 45 minutes', 'free'
+FROM masters WHERE invite_link = 'LINK1';
+
+-- 4. Создаем тестовых клиентов (чтобы обойти Foreign Key при бронировании)
+INSERT INTO clients (telegram_id, first_name) VALUES (777111222, 'Вася 1') ON CONFLICT DO NOTHING;
+INSERT INTO clients (telegram_id, first_name) VALUES (888999000, 'Вася 2') ON CONFLICT DO NOTHING;
+
+
+
+
+-- 1. Добавляем услуги (ON CONFLICT гарантирует, что при повторном запуске не будет дубликатов)
+INSERT INTO services (master_id, name, duration_min, price)
+SELECT id, 'Мужская стрижка', 45, 1500 FROM masters WHERE invite_link = 'LINK1'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO services (master_id, name, duration_min, price)
+SELECT id, 'Стрижка машинкой', 20, 800 FROM masters WHERE invite_link = 'LINK1'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO services (master_id, name, duration_min, price)
+SELECT id, 'Оформление бороды', 30, 1000 FROM masters WHERE invite_link = 'LINK1'
+ON CONFLICT DO NOTHING;
+
+INSERT INTO services (master_id, name, duration_min, price)
+SELECT id, 'Детская стрижка', 30, 700 FROM masters WHERE invite_link = 'LINK1'
+ON CONFLICT DO NOTHING;
+
+
+-- 2. Генерируем слоты на СЕГОДНЯ и ЗАВТРА (по 9 слотов в день, с 10:00 до 18:00)
+-- Статус выбирается случайно: 60% - free, 20% - pending, 20% - booked
+INSERT INTO slots (master_id, start_time, end_time, status)
+SELECT 
+    m.id, 
+    CURRENT_DATE + d AS day_start, 
+    CURRENT_DATE + d + INTERVAL '45 minutes' AS day_end,
+    CASE 
+        WHEN random() < 0.6 THEN 'free' 
+        WHEN random() < 0.5 THEN 'pending' 
+        ELSE 'booked' 
+    END AS status
+FROM masters m
+CROSS JOIN (VALUES (0), (1)) AS days(d) 
+CROSS JOIN generate_series(10, 18) AS hour(h) 
+WHERE m.invite_link = 'LINK1'
+ON CONFLICT DO NOTHING;

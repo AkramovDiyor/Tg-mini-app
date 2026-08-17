@@ -1,13 +1,17 @@
 import { Check, Clock, Bell } from 'lucide-react'
 import { SheetShell } from './SheetShell'
 import { useBookingStore } from '../../store/bookingStore'
-import { fromISO, MONTHS_GEN, SLOT_TIMES } from '../../lib/dates'
+import { fromISO, MONTHS_GEN } from '../../lib/dates'
 import { rub } from '../../lib/currency'
 
 export function ConfirmBookingSheet({ slot, confirming, onClose, onConfirm }) {
   const service = useBookingStore((s) => s.service)
   const date = fromISO(slot.iso)
-  const time = SLOT_TIMES[slot.slotIndex]
+  
+  const time = new Date(slot.startTime)
+  const hours = String(time.getUTCHours()).padStart(2, '0')
+  const minutes = String(time.getUTCMinutes()).padStart(2, '0')
+  const timeStr = `${hours}:${minutes}`
 
   return (
     <SheetShell onClose={onClose} closableOnBackdrop={!confirming}>
@@ -26,7 +30,7 @@ export function ConfirmBookingSheet({ slot, confirming, onClose, onConfirm }) {
           </p>
           <h3 className="mt-3 text-center text-2xl font-extrabold leading-snug">
             {service.name},<br />
-            {date.getDate()} {MONTHS_GEN[date.getMonth()]}, {time}
+            {date.getDate()} {MONTHS_GEN[date.getMonth()]}, {timeStr}
           </h3>
           <div className="mt-4 flex justify-center gap-2">
             <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">

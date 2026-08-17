@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { TodayTab } from './master/TodayTab'
 import { QueueTab } from './master/QueueTab'
-import { SettingsTab } from './master/SettingsTab'
+// import { SettingsTab } from './master/SettingsTab'
 import { MasterFloatingNav } from './master/MasterFloatingNav'
 import { ProfileTab } from './master/ProfileTab'
 

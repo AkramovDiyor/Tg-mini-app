@@ -1,11 +1,20 @@
+import { useEffect, useState } from 'react'
 import { User, MapPin } from 'lucide-react'
 import { SheetShell } from './SheetShell'
-import { useBookingStore } from '../../store/bookingStore'
 import { getBookingTimeLabel } from '../../lib/dates'
 
-export function BookingDetailsSheet({ onClose, onCancel }) {
-  const activeBooking = useBookingStore((s) => s.activeBooking)
-  if (!activeBooking) return null
+export function BookingDetailsSheet({ booking, onClose, onCancel }) {
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  if (!booking) return null
+
+  const bookingDate = new Date(booking.start_time)
+  const timeLabel = getBookingTimeLabel(bookingDate, now)
 
   return (
     <SheetShell onClose={onClose}>
@@ -13,10 +22,10 @@ export function BookingDetailsSheet({ onClose, onCancel }) {
         Моя запись
       </p>
       <h3 className="mt-3 text-center text-2xl font-extrabold leading-snug text-slate-900">
-        {activeBooking.service}
+        {booking.service_name}
       </h3>
       <p className="mt-1 text-center text-2xl font-extrabold leading-snug text-emerald-600">
-        {getBookingTimeLabel(activeBooking.date)}
+        {timeLabel}
       </p>
 
       <div className="mt-6 flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left">
@@ -24,16 +33,16 @@ export function BookingDetailsSheet({ onClose, onCancel }) {
           <User className="h-6 w-6" />
         </div>
         <div className="min-w-0 flex-1">
-          <p className="font-bold text-slate-900">Педро Барбер</p>
+          <p className="font-bold text-slate-900">{booking.master_name}</p>
           <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
             <MapPin className="h-3.5 w-3.5 shrink-0" />
-            ул. Центральная, 1
+            {booking.master_address}
           </p>
         </div>
       </div>
 
       <button
-        onClick={onCancel}
+        onClick={() => onCancel(booking.booking_id)}
         className="mt-6 w-full rounded-xl bg-red-50 py-4 font-bold text-red-600 transition active:scale-[0.98]"
       >
         Отменить запись

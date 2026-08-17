@@ -10,12 +10,14 @@ import (
 )
 
 
+
 type SlotRepository interface {
 	CreateSlot(ctx context.Context, slot models.Slot) error
+	CreateSlotWithID(ctx context.Context, tx pgx.Tx, slot models.Slot) (int64, error) // НОВОЕ
 	GetSlotsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Slot, error)
 	UpdateSlotStatus(ctx context.Context, tx pgx.Tx, slotID int64, status string) error
-    GetSlotByID(ctx context.Context, tx pgx.Tx, slotID int64) (models.Slot, error)
-
+	GetSlotByID(ctx context.Context, tx pgx.Tx, slotID int64) (models.Slot, error)
+	GetSlotByStartTimeAndMaster(ctx context.Context, tx pgx.Tx, masterID int64, startTime time.Time) (models.Slot, error) // НОВОЕ
 }
 
 
@@ -82,4 +84,28 @@ func (s *SlotRepo) GetSlotByID(ctx context.Context, tx pgx.Tx, slotID int64) (mo
 func (s *SlotRepo) UpdateSlotStatus(ctx context.Context, tx pgx.Tx, slotID int64, status string) error {
     _, err := tx.Exec(ctx, "UPDATE slots SET status = $1 WHERE id = $2", status, slotID)
     return err
+}
+
+func (s *SlotRepo) CreateSlotWithID(ctx context.Context, tx pgx.Tx, slot models.Slot) (int64, error) {
+	var id int64
+	query := `INSERT INTO slots (master_id, start_time, end_time, status) 
+	          VALUES ($1, $2, $3, $4) RETURNING id`
+	
+	err := tx.QueryRow(ctx, query, slot.MasterID, slot.StartTime, slot.EndTime, slot.Status).Scan(&id)
+	return id, err
+}
+
+func (s *SlotRepo) GetSlotByStartTimeAndMaster(ctx context.Context, tx pgx.Tx, masterID int64, startTime time.Time) (models.Slot, error) {
+	var slot models.Slot
+	
+	query := `SELECT id, master_id, start_time, end_time, status 
+	          FROM slots 
+	          WHERE master_id = $1 AND start_time = $2 
+	          FOR UPDATE`
+	
+	err := tx.QueryRow(ctx, query, masterID, startTime).Scan(
+		&slot.ID, &slot.MasterID, &slot.StartTime, &slot.EndTime, &slot.Status,
+	)
+	
+	return slot, err
 }

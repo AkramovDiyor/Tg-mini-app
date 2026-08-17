@@ -16,6 +16,7 @@ type MasterSettings struct {
 	AutoCancel        bool `json:"auto_cancel"`         // Авто-отмена без подтверждения
 	CancelBeforeHours int  `json:"cancel_before_hours"` // 1, 2, 4 часа
 	UseWaitlist       bool `json:"use_waitlist"`        // Предлагать окно в лист ожидания
+	SlotStepMin       int  `json:"slot_step_min"`
 }
 
 // Master — основное ядро системы

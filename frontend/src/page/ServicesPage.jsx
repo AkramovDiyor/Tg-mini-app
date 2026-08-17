@@ -1,13 +1,31 @@
+import { useEffect, useState } from 'react'
 import { User, Star, Image } from 'lucide-react'
 import { ServiceCard } from '../components/ui/ServiceCard'
 import { ActiveBookingBar } from '../widgets/ActiveBookingBar'
 import { useBookingStore } from '../store/bookingStore'
 import { useDragScroll } from '../lib/useDragScroll'
-import { SERVICES_LIST } from '../mock/data'
+import { fetchServices } from '../services/api'
 
 export function ServicesPage({ onPick, onOpenDetails }) {
   const pickService = useBookingStore((s) => s.pickService)
   const galleryRef = useDragScroll()
+
+  const [services, setServices] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchServices()
+      .then((data) => {
+        // Проверяем, что data существует и является массивом
+        setServices(Array.isArray(data) ? data : [])
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load services:', err)
+        setServices([]) // Устанавливаем пустой массив при ошибке
+        setLoading(false)
+      })
+  }, [])
 
   return (
     <div className="animate-fade-up">
@@ -50,13 +68,32 @@ export function ServicesPage({ onPick, onOpenDetails }) {
 
         <h2 className="mt-6 px-5 text-lg font-bold text-slate-900">Услуги</h2>
         <div className="mt-3 px-5">
-          {SERVICES_LIST.map((service) => (
-            <ServiceCard
-              key={service.id}
-              service={service}
-              onClick={() => { pickService(service); onPick() }}
-            />
-          ))}
+          {loading ? (
+            <div className="py-8 text-center text-sm text-slate-400">Загрузка...</div>
+          ) : (
+            services.map((service) => (
+              <ServiceCard
+                key={service.id}
+                service={{
+                  id: service.id,
+                  name: service.name,
+                  price: service.price,
+                  duration: service.duration_min,
+                  icon: User, // или другая иконка по вашему выбору
+                }}
+                onClick={() => {
+                  pickService({
+                    id: service.id,
+                    name: service.name,
+                    price: service.price,
+                    duration: service.duration_min,
+                    icon: User,
+                  })
+                  onPick()
+                }}
+              />
+            ))
+          )}
         </div>
       </div>
 

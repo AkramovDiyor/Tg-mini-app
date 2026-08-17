@@ -16,10 +16,15 @@ type Booking struct {
 	ID               int64     `json:"id"`
 	SlotID           int64     `json:"slot_id"`            // Внешний ключ на Slot (Связь 1-к-1)
 	ServiceID        int64     `json:"service_id"`         // Внешний ключ на Service
+	MasterID         int64     `json:"master_id"`
 	ClientTelegramID int64     `json:"client_telegram_id"` // ID клиента в Telegram
 	ClientName       string    `json:"client_name"`        // Имя клиента из Telegram
 	PriceLocked      int       `json:"price_locked"`       // Фиксация цены на момент записи (в целых числах)
 	Status           string    `json:"status"`             // active, confirmed, cancelled_..., completed
+
+	StartTime        time.Time `json:"start_time"`       
+	EndTime          time.Time `json:"end_time"`         
+	
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }

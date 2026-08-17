@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { ArrowLeft, Calendar, Clock } from 'lucide-react'
 import { DayPill } from '../components/ui/DayPill'
 import { CalendarDay } from '../components/ui/CalendarDay'
@@ -8,9 +8,10 @@ import { SlotsLegend } from '../components/ui/SlotsLegend'
 import { WaitlistBlock } from '../widgets/WaitlistBlock'
 import { useBookingStore } from '../store/bookingStore'
 import { useDragScroll } from '../lib/useDragScroll'
+import { fetchSlots } from '../services/api'
 import {
   TODAY, MONTHS_TITLE, WEEKDAYS_GRID,
-  buildQuickDays, buildMonthGrid, fromISO, getScheduleForDate,
+  buildQuickDays, buildMonthGrid, fromISO, toISO,
 } from '../lib/dates'
 import { rub } from '../lib/currency'
 
@@ -24,14 +25,28 @@ export function BookingPage({ onBack, onSlotClick }) {
 
   const daysScrollRef = useDragScroll()
 
-  const selected = fromISO(selectedDate)
-  const schedule = getScheduleForDate(selected)
-  const isFull = schedule.every((st) => st !== 'free')
+  const [slots, setSlots] = useState([])
+  const [loading, setLoading] = useState(false)
 
   const [view, setView] = useState({ year: TODAY.getFullYear(), month: TODAY.getMonth() })
   const diffMonths = (view.year - TODAY.getFullYear()) * 12 + (view.month - TODAY.getMonth())
   const canPrev = diffMonths > 0
   const canNext = diffMonths < 1
+
+  useEffect(() => {
+    if (!service) return
+    setLoading(true)
+    fetchSlots(selectedDate, service.id)
+      .then((data) => {
+        setSlots(Array.isArray(data) ? data : [])
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load slots:', err)
+        setSlots([])
+        setLoading(false)
+      })
+  }, [selectedDate, service])
 
   const prevMonth = () =>
     setView((v) => (v.month === 0 ? { year: v.year - 1, month: 11 } : { ...v, month: v.month - 1 }))
@@ -43,6 +58,20 @@ export function BookingPage({ onBack, onSlotClick }) {
     const d = fromISO(iso)
     setView({ year: d.getFullYear(), month: d.getMonth() })
   }
+
+  const formattedSlots = slots.map((slot) => {
+    const time = new Date(slot.start_time)
+    const hours = String(time.getUTCHours()).padStart(2, '0')
+    const minutes = String(time.getUTCMinutes()).padStart(2, '0')
+    return {
+      start_time: slot.start_time,
+      time: `${hours}:${minutes}`,
+      status: slot.status === 'booked' ? 'busy' : slot.status,
+    }
+  })
+
+  const isDayOff = formattedSlots.length === 0
+  const isFull = formattedSlots.length > 0 && formattedSlots.every((s) => s.status !== 'free')
 
   return (
     <div className="animate-fade-up pb-16">
@@ -56,7 +85,7 @@ export function BookingPage({ onBack, onSlotClick }) {
         <div className="min-w-0">
           <h1 className="text-lg font-bold leading-tight">Выбор времени</h1>
           <p className="truncate text-xs text-slate-400">
-            {service.name} · {service.duration} мин · {rub(service.price)}
+            {service?.name} · {service?.duration} мин · {rub(service?.price || 0)}
           </p>
         </div>
       </header>
@@ -104,7 +133,7 @@ export function BookingPage({ onBack, onSlotClick }) {
                 selected={d.getTime() === fromISO(selectedDate).getTime()}
                 isToday={d.getTime() === TODAY.getTime()}
                 disabled={d < TODAY}
-                onClick={() => handleSelect(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)}
+                onClick={() => handleSelect(toISO(d))}
               />
             )
           )}
@@ -117,19 +146,26 @@ export function BookingPage({ onBack, onSlotClick }) {
           <span className="text-sm font-semibold">Время</span>
         </div>
 
-        {isFull ? (
+        {loading ? (
+          <div className="py-8 text-center text-sm text-slate-400">Загрузка...</div>
+        ) : isDayOff ? (
+          <div className="animate-fade-in rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
+            <p className="text-lg font-bold text-slate-900">Мастер не работает в этот день</p>
+            <p className="mt-1.5 text-sm text-slate-400">Выберите другую дату</p>
+          </div>
+        ) : isFull ? (
           <WaitlistBlock iso={selectedDate} />
         ) : (
           <div key={selectedDate} className="animate-fade-in">
             <div className="grid grid-cols-3 gap-2.5">
-              {schedule.map((status, slotIndex) => {
-                const key = `${selectedDate}-${slotIndex}`
+              {formattedSlots.map((slot) => {
+                const key = `${selectedDate}-${slot.start_time}`
                 return (
                   <SlotButton
-                    key={key}
-                    time={['10:00', '11:30', '13:00', '14:30', '16:00'][slotIndex]}
-                    status={myBookings[key] ? 'mine' : status}
-                    onClick={() => onSlotClick(selectedDate, slotIndex)}
+                    key={slot.start_time}
+                    time={slot.time}
+                    status={myBookings[key] ? 'mine' : slot.status}
+                    onClick={() => onSlotClick(slot.start_time, selectedDate)}
                   />
                 )
               })}

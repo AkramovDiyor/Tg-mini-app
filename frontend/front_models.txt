@@ -1,0 +1,1804 @@
+
+--- FILE: ./postcss.config.js ---
+export default {
+    plugins: {
+      '@tailwindcss/postcss': {},
+      autoprefixer: {},
+    },
+  }
+--- FILE: ./src/App.jsx ---
+import React, { useState } from 'react'
+import { useBookingStore } from './store/bookingStore'
+
+
+import { ConfirmBookingSheet } from './components/sheets/ConfirmBookingSheet'
+import { BookingDetailsSheet } from './components/sheets/BookingDetailsSheet'
+import { Toast } from './components/ui/Toast'
+import { bookSlot } from './services/api'
+import { ServicesPage } from './page/ServicesPage'
+import { BookingPage } from './page/BookingPage'
+import { MasterPage } from './page/MasterPage'
+
+export default function App() {
+  const [role, setRole] = useState('client')
+
+  const [screen, setScreen] = useState('services')
+  const [sheetSlot, setSheetSlot] = useState(null)
+  const [confirming, setConfirming] = useState(false)
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false)
+
+  const bookSlotAction = useBookingStore((s) => s.bookSlot)
+  const showToast = useBookingStore((s) => s.showToast)
+  const activeBooking = useBookingStore((s) => s.activeBooking)
+  const cancelActiveBooking = useBookingStore((s) => s.cancelActiveBooking)
+  const service = useBookingStore((s) => s.service)
+
+  const handleConfirm = async () => {
+    if (!sheetSlot) return
+    setConfirming(true)
+
+    try {
+      await bookSlot({
+        slot_id: sheetSlot.slotId,
+        service_id: service.id,
+        name: 'Имя клиента', // TODO: получить из формы или Telegram
+        price: service.price,
+      })
+
+      const key = `${sheetSlot.iso}-${sheetSlot.slotId}`
+      bookSlotAction(key)
+      setConfirming(false)
+      setSheetSlot(null)
+      showToast('Запись подтверждена! За 2 часа до визита пришлём напоминание 🤝')
+    } catch (err) {
+      setConfirming(false)
+      const message = err.response?.data?.message || 'Ошибка при бронировании'
+      showToast(message)
+    }
+  }
+
+  const handleCancelBooking = () => {
+    setIsDetailsOpen(false)
+    cancelActiveBooking()
+    showToast('Запись отменена. Время освобождено для других')
+  }
+
+  return (
+    <div className="flex min-h-screen justify-center font-sans">
+      <div className="relative min-h-screen w-full max-w-[420px] bg-[#F9FAFB] shadow-2xl">
+        {/* ПЕРЕКЛЮЧАТЕЛЬ РОЛЕЙ */}
+        <div className="sticky top-0 z-30 border-b border-slate-200 bg-[#F9FAFB]/90 px-4 py-3 backdrop-blur">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setRole('client')}
+              className={`flex-1 rounded-xl py-2.5 text-sm font-bold transition ${role === 'client'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/25'
+                : 'border border-slate-200 bg-white text-slate-500'
+                }`}
+            >
+              Я клиент
+            </button>
+            <button
+              onClick={() => setRole('master')}
+              className={`flex-1 rounded-xl py-2.5 text-sm font-bold transition ${role === 'master'
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/25'
+                : 'border border-slate-200 bg-white text-slate-500'
+                }`}
+            >
+              Я мастер
+            </button>
+          </div>
+        </div>
+
+        {/* КОНТЕНТ */}
+        {role === 'client' ? (
+          <>
+            {screen === 'services' ? (
+              <ServicesPage
+                onPick={() => setScreen('booking')}
+                onOpenDetails={() => setIsDetailsOpen(true)}
+              />
+            ) : (
+              <BookingPage
+                onBack={() => setScreen('services')}
+                onSlotClick={(slotId, iso) => setSheetSlot({ slotId, iso })}
+              />
+            )}
+          </>
+        ) : (
+          <MasterPage />
+        )}
+
+        {role === 'client' && sheetSlot && (
+          <ConfirmBookingSheet
+            slot={sheetSlot}
+            confirming={confirming}
+            onClose={() => setSheetSlot(null)}
+            onConfirm={handleConfirm}
+          />
+        )}
+
+        {role === 'client' && isDetailsOpen && activeBooking && (
+          <BookingDetailsSheet
+            onClose={() => setIsDetailsOpen(false)}
+            onCancel={handleCancelBooking}
+          />
+        )}
+
+        <Toast />
+      </div>
+    </div>
+  )
+}
+--- FILE: ./src/components/sheets/AddServiceSheet.jsx ---
+import { useState } from 'react'
+import { SheetShell } from './SheetShell'
+import { useBookingStore } from '../../store/bookingStore'
+
+const DURATION_OPTIONS = [
+  { label: '15 мин', minutes: 15 },
+  { label: '30 мин', minutes: 30 },
+  { label: '45 мин', minutes: 45 },
+  { label: '1 ч',    minutes: 60 },
+  { label: '1.5 ч',  minutes: 90 },
+  { label: '2 ч',    minutes: 120 },
+]
+
+export function AddServiceSheet({ onClose }) {
+  const showToast = useBookingStore((s) => s.showToast)
+
+  const [name, setName] = useState('')
+  const [minutes, setMinutes] = useState(45)
+  const [price, setPrice] = useState('')
+
+  const isValid = name.trim().length > 0 && price.trim().length > 0 && Number(price) > 0
+
+  const handleSave = () => {
+    if (!isValid) return
+    onClose()
+    showToast(`Услуга «${name}» добавлена 🎉`)
+  }
+
+  return (
+    <SheetShell onClose={onClose}>
+      <h2 className="mb-5 text-xl font-bold text-slate-900">Новая услуга</h2>
+
+      {/* Название */}
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-500">Название</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Например, Стрижка ножницами"
+          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3.5 text-base font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+        />
+      </div>
+
+      {/* Длительность */}
+      <div className="mt-4">
+        <label className="mb-2 block text-sm font-semibold text-slate-500">Длительность</label>
+        <div className="flex flex-wrap gap-2">
+          {DURATION_OPTIONS.map((opt) => {
+            const isActive = minutes === opt.minutes
+            return (
+              <button
+                key={opt.minutes}
+                onClick={() => setMinutes(opt.minutes)}
+                className={`rounded-xl px-4 py-2 text-sm transition ${
+                  isActive
+                    ? 'bg-emerald-500 font-bold text-white shadow-md shadow-emerald-500/25'
+                    : 'bg-slate-100 font-medium text-slate-600 active:scale-95'
+                }`}
+              >
+                {opt.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Стоимость */}
+      <div className="mt-4">
+        <label className="mb-2 block text-sm font-semibold text-slate-500">Стоимость</label>
+        <div className="relative">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={price}
+            onChange={(e) => setPrice(e.target.value.replace(/\D/g, ''))}
+            placeholder="0"
+            className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3.5 pr-10 text-base font-bold text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+          />
+          <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 font-bold text-slate-400">
+            ₽
+          </span>
+        </div>
+      </div>
+
+      {/* Кнопка сохранения */}
+      <button
+        onClick={handleSave}
+        disabled={!isValid}
+        className={`mt-6 w-full rounded-xl py-4 font-bold transition ${
+          isValid
+            ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 active:scale-[0.98]'
+            : 'bg-slate-200 text-slate-400'
+        }`}
+      >
+        Сохранить услугу
+      </button>
+    </SheetShell>
+  )
+}
+--- FILE: ./src/components/sheets/BookingDetailsSheet.jsx ---
+import { User, MapPin } from 'lucide-react'
+import { SheetShell } from './SheetShell'
+import { useBookingStore } from '../../store/bookingStore'
+import { getBookingTimeLabel } from '../../lib/dates'
+
+export function BookingDetailsSheet({ onClose, onCancel }) {
+  const activeBooking = useBookingStore((s) => s.activeBooking)
+  if (!activeBooking) return null
+
+  return (
+    <SheetShell onClose={onClose}>
+      <p className="text-center text-[11px] font-bold uppercase tracking-widest text-slate-400">
+        Моя запись
+      </p>
+      <h3 className="mt-3 text-center text-2xl font-extrabold leading-snug text-slate-900">
+        {activeBooking.service}
+      </h3>
+      <p className="mt-1 text-center text-2xl font-extrabold leading-snug text-emerald-600">
+        {getBookingTimeLabel(activeBooking.date)}
+      </p>
+
+      <div className="mt-6 flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-white">
+          <User className="h-6 w-6" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="font-bold text-slate-900">Педро Барбер</p>
+          <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            ул. Центральная, 1
+          </p>
+        </div>
+      </div>
+
+      <button
+        onClick={onCancel}
+        className="mt-6 w-full rounded-xl bg-red-50 py-4 font-bold text-red-600 transition active:scale-[0.98]"
+      >
+        Отменить запись
+      </button>
+    </SheetShell>
+  )
+}
+--- FILE: ./src/components/sheets/ConfirmBookingSheet.jsx ---
+import { Check, Clock, Bell } from 'lucide-react'
+import { SheetShell } from './SheetShell'
+import { useBookingStore } from '../../store/bookingStore'
+import { fromISO, MONTHS_GEN, SLOT_TIMES } from '../../lib/dates'
+import { rub } from '../../lib/currency'
+
+export function ConfirmBookingSheet({ slot, confirming, onClose, onConfirm }) {
+  const service = useBookingStore((s) => s.service)
+  const date = fromISO(slot.iso)
+  const time = SLOT_TIMES[slot.slotIndex]
+
+  return (
+    <SheetShell onClose={onClose} closableOnBackdrop={!confirming}>
+      {confirming ? (
+        <div className="flex animate-pop-in flex-col items-center py-10 text-center">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+            <Check className="h-8 w-8" strokeWidth={3} />
+          </div>
+          <p className="text-lg font-bold">Запись подтверждена!</p>
+          <p className="mt-1 text-sm text-slate-400">Напомним за 2 часа до начала</p>
+        </div>
+      ) : (
+        <>
+          <p className="text-center text-[11px] font-bold uppercase tracking-widest text-slate-400">
+            Подтверждение записи
+          </p>
+          <h3 className="mt-3 text-center text-2xl font-extrabold leading-snug">
+            {service.name},<br />
+            {date.getDate()} {MONTHS_GEN[date.getMonth()]}, {time}
+          </h3>
+          <div className="mt-4 flex justify-center gap-2">
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+              <Clock className="h-3.5 w-3.5" />
+              {service.duration} мин
+            </span>
+            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-emerald-600">
+              {rub(service.price)}
+            </span>
+          </div>
+          <button
+            onClick={onConfirm}
+            className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-4 text-[15px] font-bold text-white shadow-lg shadow-emerald-600/25 transition active:scale-[0.98]"
+          >
+            <Check className="h-5 w-5" strokeWidth={3} />
+            Подтвердить запись
+          </button>
+          <p className="mt-3 flex items-start gap-1.5 px-2 text-[11px] leading-relaxed text-slate-400">
+            <Bell className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            За 2 часа до начала придет кнопка подтверждения. Если не нажать — запись может быть передана другому.
+          </p>
+        </>
+      )}
+    </SheetShell>
+  )
+}
+--- FILE: ./src/components/sheets/EditProfileSheet.jsx ---
+import { useState } from 'react'
+import { MapPin } from 'lucide-react'
+import { SheetShell } from './SheetShell'
+import { useBookingStore } from '../../store/bookingStore'
+
+export function EditProfileSheet({ onClose }) {
+  const showToast = useBookingStore((s) => s.showToast)
+
+  const [name, setName] = useState('Педро Барбер')
+  const [specialty, setSpecialty] = useState('Барбер · 6 лет опыта')
+  const [address, setAddress] = useState('ул. Центральная, 1')
+
+  const handleSave = () => {
+    onClose()
+    showToast('Профиль обновлён ✨')
+  }
+
+  return (
+    <SheetShell onClose={onClose}>
+      <h2 className="mb-5 text-xl font-bold text-slate-900">Редактировать профиль</h2>
+
+      {/* Имя */}
+      <div>
+        <label className="mb-2 block text-sm font-semibold text-slate-500">Имя</label>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Имя и фамилия"
+          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3.5 text-base font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+        />
+      </div>
+
+      {/* Специализация */}
+      <div className="mt-3">
+        <label className="mb-2 block text-sm font-semibold text-slate-500">Специализация</label>
+        <input
+          type="text"
+          value={specialty}
+          onChange={(e) => setSpecialty(e.target.value)}
+          placeholder="Например, Барбер · 6 лет опыта"
+          className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3.5 text-base font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+        />
+      </div>
+
+      {/* Адрес с иконкой MapPin внутри */}
+      <div className="mt-3">
+        <label className="mb-2 block text-sm font-semibold text-slate-500">Адрес студии</label>
+        <div className="relative">
+          <MapPin className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={address}
+            onChange={(e) => setAddress(e.target.value)}
+            placeholder="Улица, дом"
+            className="w-full rounded-xl border-0 bg-slate-100 py-3.5 pl-11 pr-4 text-base font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+          />
+        </div>
+      </div>
+
+      {/* Кнопка сохранения */}
+      <button
+        onClick={handleSave}
+        className="mt-6 w-full rounded-xl bg-emerald-500 py-4 font-bold text-white shadow-lg shadow-emerald-500/25 transition active:scale-[0.98]"
+      >
+        Сохранить
+      </button>
+    </SheetShell>
+  )
+}
+--- FILE: ./src/components/sheets/SheetShell.jsx ---
+export function SheetShell({ children, onClose, closableOnBackdrop = true }) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center">
+        <div
+          className="absolute inset-0 animate-fade-in bg-slate-900/60 backdrop-blur-[2px]"
+          onClick={closableOnBackdrop ? onClose : undefined}
+        />
+        <div className="relative w-full max-w-[420px] animate-slide-up rounded-t-3xl bg-white px-5 pb-8 pt-3 shadow-2xl">
+          <div className="mx-auto mb-6 h-1.5 w-12 rounded-full bg-slate-200" />
+          {children}
+        </div>
+      </div>
+    )
+  }
+--- FILE: ./src/components/ui/CalendarDay.jsx ---
+export function CalendarDay({ date, selected, isToday, disabled, onClick }) {
+    return (
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        className={`flex aspect-square items-center justify-center rounded-xl text-sm font-semibold transition ${
+          disabled
+            ? 'cursor-not-allowed text-slate-300'
+            : selected
+              ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+              : isToday
+                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200 active:scale-95'
+                : 'border border-slate-200/70 bg-white text-slate-700 shadow-sm hover:border-emerald-300 active:scale-95'
+        }`}
+      >
+        {date.getDate()}
+      </button>
+    )
+  }
+--- FILE: ./src/components/ui/DayPill.jsx ---
+export function DayPill({ day, selected, onClick }) {
+    return (
+      <button
+        onClick={onClick}
+        className={`flex w-[72px] shrink-0 snap-start flex-col items-center gap-1 rounded-xl border py-2.5 transition-all ${
+          selected
+            ? 'border-emerald-600 bg-emerald-600 text-white shadow-lg shadow-emerald-600/30'
+            : 'border-slate-200 bg-white text-slate-500 shadow-sm active:scale-95'
+        }`}
+      >
+        <span className={`text-[10px] font-semibold uppercase ${selected ? 'text-emerald-100' : 'text-slate-400'}`}>
+          {day.label}
+        </span>
+        <span className="text-lg font-bold leading-none">{day.date.getDate()}</span>
+      </button>
+    )
+  }
+--- FILE: ./src/components/ui/NavArrow.jsx ---
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+
+export function NavArrow({ direction, onClick, disabled }) {
+  const Icon = direction === 'prev' ? ChevronLeft : ChevronRight
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition active:scale-90 disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      <Icon className="h-5 w-5" />
+    </button>
+  )
+}
+--- FILE: ./src/components/ui/ServiceCard.jsx ---
+import { Clock, ChevronRight } from 'lucide-react'
+import { rub } from '../../lib/currency'
+
+export function ServiceCard({ service, onClick }) {
+  const Icon = service.icon
+  return (
+    <button
+      onClick={onClick}
+      className="group relative mb-4 w-full rounded-2xl bg-white p-5 pb-16 text-left shadow-md transition active:scale-[0.98]"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <p className="text-lg font-bold text-slate-900">{service.name}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-400">
+            <Clock className="h-4 w-4" />
+            {service.duration} мин
+          </p>
+        </div>
+        <p className="text-xl font-extrabold text-slate-900">{rub(service.price)}</p>
+      </div>
+      <span className="absolute bottom-4 right-4 flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 transition-transform duration-200 group-active:translate-x-0.5">
+        <ChevronRight className="h-5 w-5" />
+      </span>
+    </button>
+  )
+}
+--- FILE: ./src/components/ui/SlotButton.jsx ---
+export function SlotButton({ time, status, onClick }) {
+    const base = 'flex items-center justify-center rounded-xl border-2 py-4 text-[15px] font-bold select-none transition'
+  
+    if (status === 'busy' || status === 'mine') {
+      return (
+        <button disabled className={`${base} cursor-not-allowed border-transparent bg-slate-100 text-slate-300`}>
+          {time}
+        </button>
+      )
+    }
+  
+    if (status === 'pending') {
+      return (
+        <button disabled className={`${base} cursor-not-allowed border-amber-200 bg-amber-100 text-amber-700`}>
+          {time}
+        </button>
+      )
+    }
+  
+    return (
+      <button
+        onClick={onClick}
+        className={`${base} border-emerald-500 bg-white text-slate-900 shadow-sm hover:bg-emerald-50 active:scale-95`}
+      >
+        {time}
+      </button>
+    )
+  }
+--- FILE: ./src/components/ui/SlotsLegend.jsx ---
+export function SlotsLegend() {
+    return (
+      <div className="mt-4 flex items-center gap-4 text-[11px] text-slate-400">
+        <span className="flex items-center gap-1.5">
+          <i className="h-2 w-2 rounded-full bg-emerald-500" />
+          Свободно
+        </span>
+        <span className="flex items-center gap-1.5">
+          <i className="h-2 w-2 rounded-full bg-amber-400" />
+          Подтверждается
+        </span>
+        <span className="flex items-center gap-1.5">
+          <i className="h-2 w-2 rounded-full bg-slate-300" />
+          Занято
+        </span>
+      </div>
+    )
+  }
+--- FILE: ./src/components/ui/Toast.jsx ---
+import { useEffect } from 'react'
+import { Bell } from 'lucide-react'
+import { useBookingStore } from '../../store/bookingStore'
+
+export function Toast() {
+  const toast = useBookingStore((s) => s.toast)
+  const hideToast = useBookingStore((s) => s.hideToast)
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(hideToast, 3500)
+    return () => clearTimeout(t)
+  }, [toast, hideToast])
+
+  if (!toast) return null
+
+  return (
+    <div className="pointer-events-none fixed inset-x-0 bottom-6 z-[60] flex justify-center px-5">
+      <div
+        key={toast.id}
+        className="pointer-events-auto flex w-full max-w-[380px] animate-toast-in items-start gap-2.5 rounded-2xl bg-slate-900/95 px-4 py-3.5 text-white shadow-2xl"
+      >
+        <Bell className="mt-0.5 h-4 w-4 shrink-0 text-emerald-400" />
+        <p className="text-[13px] font-medium leading-snug">{toast.text}</p>
+      </div>
+    </div>
+  )
+}
+--- FILE: ./src/components/ui/Toggle.jsx ---
+export function Toggle({ checked, onChange, label }) {
+    return (
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        onClick={() => onChange(!checked)}
+        className={`relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ${
+          checked ? 'bg-emerald-500' : 'bg-slate-200'
+        }`}
+      >
+        <span
+          className={`absolute left-0.5 top-0.5 h-6 w-6 rounded-full bg-white shadow-md transition-transform duration-200 ${
+            checked ? 'translate-x-5' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    )
+  }
+--- FILE: ./src/lib/currency.js ---
+export const rub = (n) => `${n.toLocaleString('ru-RU')} ₽`
+--- FILE: ./src/lib/dates.js ---
+// Все helpers по датам и календарю. Без React-зависимостей.
+
+export const SLOT_TIMES = ['10:00', '11:30', '13:00', '14:30', '16:00']
+
+export const MONTHS_GEN = [
+  'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
+]
+export const MONTHS_TITLE = [
+  'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
+]
+export const WEEKDAYS_SHORT = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+export const WEEKDAYS_GRID = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+
+const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
+export const TODAY = startOfDay(new Date())
+
+export const toISO = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+export const fromISO = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+export const daysFromToday = (d) => Math.round((startOfDay(d) - TODAY) / 86400000)
+
+export const formatTime = (d) =>
+  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+
+export function buildQuickDays(count = 7) {
+  const res = []
+  for (let i = 0; i < count; i++) {
+    const date = new Date(TODAY.getFullYear(), TODAY.getMonth(), TODAY.getDate() + i)
+    res.push({
+      date,
+      iso: toISO(date),
+      label: i === 0 ? 'Сегодня' : i === 1 ? 'Завтра' : WEEKDAYS_SHORT[date.getDay()],
+    })
+  }
+  return res
+}
+
+export function buildMonthGrid(year, month) {
+  const firstDay = new Date(year, month, 1)
+  const daysInMonth = new Date(year, month + 1, 0).getDate()
+
+  let offset = firstDay.getDay() - 1
+  if (offset < 0) offset = 6
+
+  const cells = Array(offset).fill(null)
+  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d))
+  return cells
+}
+
+const DEMO_PATTERNS = {
+  0: ['free', 'busy', 'free', 'pending', 'free'],
+  1: ['free', 'free', 'busy', 'free', 'pending'],
+  2: ['busy', 'busy', 'busy', 'busy', 'busy'], // ← демо листа ожидания
+}
+
+export function getScheduleForDate(date) {
+  const diff = daysFromToday(date)
+  if (DEMO_PATTERNS[diff]) return DEMO_PATTERNS[diff]
+
+  const seed = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate()
+  return SLOT_TIMES.map((_, i) => {
+    const v = (seed * 31 + i * 57) % 100
+    if (v < 55) return 'free'
+    if (v < 85) return 'busy'
+    return 'pending'
+  })
+}
+
+export function getBookingTimeLabel(target, now = new Date()) {
+  const diff = target - now
+  if (diff <= 0) return 'Скоро начнётся'
+
+  const HOUR = 3600000
+  if (diff > 24 * HOUR) {
+    return `${target.getDate()} ${MONTHS_GEN[target.getMonth()]}, ${formatTime(target)}`
+  }
+  if (diff > 3 * HOUR) {
+    return `Сегодня, ${formatTime(target)}`
+  }
+
+  const h = Math.floor(diff / HOUR)
+  const m = Math.floor((diff % HOUR) / 60000)
+  return h > 0 ? `Через ${h} ч ${m} мин` : `Через ${m} мин`
+}
+--- FILE: ./src/lib/useDragScroll.js ---
+import { useEffect, useRef } from 'react'
+
+export function useDragScroll() {
+  const ref = useRef(null)
+  const state = useRef({ down: false, moved: 0, startX: 0, startLeft: 0 })
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const onDown = (e) => {
+      if (e.pointerType !== 'mouse') return
+      state.current = { down: true, moved: 0, startX: e.clientX, startLeft: el.scrollLeft }
+    }
+    const onMove = (e) => {
+      const s = state.current
+      if (!s.down) return
+      const dx = e.clientX - s.startX
+      s.moved = Math.max(s.moved, Math.abs(dx))
+      if (s.moved > 4) el.scrollLeft = s.startLeft - dx
+    }
+    const onUp = () => {
+      const s = state.current
+      if (s.down && s.moved > 4) {
+        el.addEventListener(
+          'click',
+          (e) => { e.preventDefault(); e.stopPropagation() },
+          { capture: true, once: true },
+        )
+      }
+      s.down = false
+    }
+
+    el.addEventListener('pointerdown', onDown)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    return () => {
+      el.removeEventListener('pointerdown', onDown)
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+  }, [])
+
+  return ref
+}
+--- FILE: ./src/main.jsx ---
+import React from 'react'
+import ReactDOM from 'react-dom/client'
+import App from './App.jsx'
+import './index.css'
+
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>,
+)
+--- FILE: ./src/mock/data.js ---
+import { Scissors, Zap } from 'lucide-react'
+
+export const SERVICES_LIST = [
+  { id: 1, name: 'Мужская стрижка',  price: 1500, duration: 45, icon: Scissors },
+  { id: 2, name: 'Стрижка машинкой', price: 800,  duration: 20, icon: Zap },
+]
+--- FILE: ./src/mock/makeMockActiveBooking.js ---
+import { formatTime, toISO } from '../lib/dates'
+
+export const makeMockActiveBooking = () => {
+  const date = new Date(Date.now() + 2 * 60 * 60 * 1000)
+  return {
+    iso: toISO(date),
+    time: formatTime(date),
+    service: 'Мужская стрижка',
+    date,
+  }
+}
+--- FILE: ./src/mock/masterData.js ---
+import { CalendarDays, Users, User } from 'lucide-react'
+
+export const TODAY_APPOINTMENTS = [
+  { time: '10:00', client: 'Алексей П.', service: 'Мужская стрижка',  price: 1500, status: 'confirmed' },
+  { time: '13:00', client: 'Мария К.',  service: 'Стрижка машинкой', price: 800,  status: 'pending'   },
+  { time: '15:30', client: null,        service: null,               price: 0,    status: 'free'      },
+]
+
+export const WAITLIST = [
+  { id: 1, name: 'Алексей М.', initials: 'АМ', time: '13:00–14:00', joinedAt: '09:42' },
+  { id: 2, name: 'Дмитрий С.', initials: 'ДС', time: '16:00–17:00', joinedAt: '10:15' },
+]
+
+export const DOT_COLORS = {
+  confirmed: 'bg-emerald-500',
+  pending:   'bg-amber-400',
+  free:      'bg-slate-200',
+}
+
+export const AVATAR_GRADIENTS = [
+  'from-amber-400 to-rose-500',
+  'from-sky-400 to-indigo-600',
+  'from-emerald-400 to-teal-600',
+]
+
+export const MASTER_TABS = [
+  { id: 'today',   icon: CalendarDays },
+  { id: 'queue',   icon: Users        },
+  { id: 'profile', icon: User         }, // ← было settings
+]
+
+export const WEEK_TAGS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+export const CANCEL_HOURS = ['1', '2', '4']
+--- FILE: ./src/page/BookingPage.jsx ---
+import { useState, useEffect } from 'react'
+import { ArrowLeft, Calendar, Clock } from 'lucide-react'
+import { DayPill } from '../components/ui/DayPill'
+import { CalendarDay } from '../components/ui/CalendarDay'
+import { NavArrow } from '../components/ui/NavArrow'
+import { SlotButton } from '../components/ui/SlotButton'
+import { SlotsLegend } from '../components/ui/SlotsLegend'
+import { WaitlistBlock } from '../widgets/WaitlistBlock'
+import { useBookingStore } from '../store/bookingStore'
+import { useDragScroll } from '../lib/useDragScroll'
+import { fetchSlots } from '../services/api'
+import {
+  TODAY, MONTHS_TITLE, WEEKDAYS_GRID,
+  buildQuickDays, buildMonthGrid, fromISO, toISO,
+} from '../lib/dates'
+import { rub } from '../lib/currency'
+
+const QUICK_DAYS = buildQuickDays()
+
+export function BookingPage({ onBack, onSlotClick }) {
+  const service = useBookingStore((s) => s.service)
+  const selectedDate = useBookingStore((s) => s.selectedDate)
+  const setDate = useBookingStore((s) => s.setDate)
+  const myBookings = useBookingStore((s) => s.myBookings)
+
+  const daysScrollRef = useDragScroll()
+
+  const [slots, setSlots] = useState([])
+  const [loading, setLoading] = useState(false)
+
+  const [view, setView] = useState({ year: TODAY.getFullYear(), month: TODAY.getMonth() })
+  const diffMonths = (view.year - TODAY.getFullYear()) * 12 + (view.month - TODAY.getMonth())
+  const canPrev = diffMonths > 0
+  const canNext = diffMonths < 1
+
+  // Загрузка слотов при изменении даты
+  useEffect(() => {
+    setLoading(true)
+    fetchSlots(selectedDate)
+      .then((data) => {
+        // Проверяем, что data является массивом
+        setSlots(Array.isArray(data) ? data : [])
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load slots:', err)
+        setSlots([]) // Устанавливаем пустой массив при ошибке
+        setLoading(false)
+      })
+  }, [selectedDate])
+
+  const prevMonth = () =>
+    setView((v) => (v.month === 0 ? { year: v.year - 1, month: 11 } : { ...v, month: v.month - 1 }))
+  const nextMonth = () =>
+    setView((v) => (v.month === 11 ? { year: v.year + 1, month: 0 } : { ...v, month: v.month + 1 }))
+
+  const handleSelect = (iso) => {
+    setDate(iso)
+    const d = fromISO(iso)
+    setView({ year: d.getFullYear(), month: d.getMonth() })
+  }
+
+  // Преобразование слотов из API в формат для SlotButton
+  const formattedSlots = slots.map((slot) => {
+    const time = new Date(slot.start_time)
+    const hours = String(time.getHours()).padStart(2, '0')
+    const minutes = String(time.getMinutes()).padStart(2, '0')
+    return {
+      id: slot.id,
+      time: `${hours}:${minutes}`,
+      status: slot.status === 'booked' ? 'busy' : slot.status,
+    }
+  })
+
+  const isFull = formattedSlots.length > 0 && formattedSlots.every((s) => s.status !== 'free')
+
+  return (
+    <div className="animate-fade-up pb-16">
+      <header className="flex items-center gap-3 px-5 pt-6">
+        <button
+          onClick={onBack}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition active:scale-90"
+        >
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <div className="min-w-0">
+          <h1 className="text-lg font-bold leading-tight">Выбор времени</h1>
+          <p className="truncate text-xs text-slate-400">
+            {service.name} · {service.duration} мин · {rub(service.price)}
+          </p>
+        </div>
+      </header>
+
+      <section className="mt-6 px-5">
+        <div className="mb-2.5 flex items-center gap-1.5 text-slate-500">
+          <Calendar className="h-4 w-4" />
+          <span className="text-sm font-semibold">Дата</span>
+        </div>
+
+        <div
+          ref={daysScrollRef}
+          className="thin-scrollbar -mx-5 flex cursor-grab snap-x snap-mandatory select-none gap-2 scroll-pl-5 overflow-x-auto px-5 pb-2 active:cursor-grabbing"
+        >
+          {QUICK_DAYS.map((d) => (
+            <DayPill
+              key={d.iso}
+              day={d}
+              selected={d.iso === selectedDate}
+              onClick={() => handleSelect(d.iso)}
+            />
+          ))}
+        </div>
+
+        <div className="mb-3 mt-5 flex items-center justify-between">
+          <NavArrow direction="prev" onClick={prevMonth} disabled={!canPrev} />
+          <p className="font-bold">
+            {MONTHS_TITLE[view.month]} {view.year}
+          </p>
+          <NavArrow direction="next" onClick={nextMonth} disabled={!canNext} />
+        </div>
+
+        <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-semibold uppercase text-slate-400">
+          {WEEKDAYS_GRID.map((w) => <span key={w} className="py-1">{w}</span>)}
+        </div>
+
+        <div key={`${view.year}-${view.month}`} className="mt-1.5 grid animate-fade-in grid-cols-7 gap-1.5">
+          {buildMonthGrid(view.year, view.month).map((d, i) =>
+            d === null ? (
+              <div key={`empty-${i}`} />
+            ) : (
+              <CalendarDay
+                key={d.toISOString()}
+                date={d}
+                selected={d.getTime() === fromISO(selectedDate).getTime()}
+                isToday={d.getTime() === TODAY.getTime()}
+                disabled={d < TODAY}
+                onClick={() => handleSelect(toISO(d))}
+              />
+            )
+          )}
+        </div>
+      </section>
+
+      <section className="mt-6 px-5">
+        <div className="mb-3 flex items-center gap-1.5 text-slate-500">
+          <Clock className="h-4 w-4" />
+          <span className="text-sm font-semibold">Время</span>
+        </div>
+
+        {loading ? (
+          <div className="py-8 text-center text-sm text-slate-400">Загрузка...</div>
+        ) : isFull ? (
+          <WaitlistBlock iso={selectedDate} />
+        ) : (
+          <div key={selectedDate} className="animate-fade-in">
+            <div className="grid grid-cols-3 gap-2.5">
+              {formattedSlots.map((slot) => {
+                const key = `${selectedDate}-${slot.id}`
+                return (
+                  <SlotButton
+                    key={key}
+                    time={slot.time}
+                    status={myBookings[key] ? 'mine' : slot.status}
+                    onClick={() => onSlotClick(slot.id, selectedDate)}
+                  />
+                )
+              })}
+            </div>
+            <SlotsLegend />
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+--- FILE: ./src/page/master/MasterFloatingNav.jsx ---
+import { MASTER_TABS } from '../../mock/masterData'
+
+export function MasterFloatingNav({ active, onChange }) {
+  return (
+    <div className="fixed bottom-4 left-1/2 z-30 w-[calc(100%-2.5rem)] max-w-[380px] -translate-x-1/2">
+      <div className="flex items-center justify-around rounded-full border border-white/50 bg-white/80 px-4 py-2.5 shadow-lg backdrop-blur-xl">
+        {MASTER_TABS.map((tab) => {
+          const Icon = tab.icon
+          const isActive = active === tab.id
+          return (
+            <button
+              key={tab.id}
+              onClick={() => onChange(tab.id)}
+              className="flex items-center justify-center p-1 transition"
+            >
+              {isActive ? (
+                <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500 text-white shadow-md shadow-emerald-500/30">
+                  <Icon className="h-5 w-5" strokeWidth={2.5} />
+                </span>
+              ) : (
+                <span className="flex h-10 w-10 items-center justify-center text-slate-400 transition hover:text-slate-600">
+                  <Icon className="h-5 w-5" />
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+--- FILE: ./src/page/master/ProfileTab.jsx ---
+import { useState } from 'react'
+import {
+  MapPin, Clock, Plus, Bell, Moon, LogOut, User, Pencil, ChevronRight,
+} from 'lucide-react'
+import { useBookingStore } from '../../store/bookingStore'
+import { rub } from '../../lib/currency'
+import { SERVICES_LIST } from '../../mock/data'
+import { WEEK_TAGS, CANCEL_HOURS } from '../../mock/masterData'
+import { Toggle } from '../../components/ui/Toggle'
+import { AddServiceSheet } from '../../components/sheets/AddServiceSheet'
+import { EditProfileSheet } from '../../components/sheets/EditProfileSheet'
+
+const APP_SETTINGS = [
+  { id: 'notifications', label: 'Уведомления',       icon: Bell,   kind: 'toggle' },
+  { id: 'theme',         label: 'Тёмная тема',       icon: Moon,   kind: 'toggle' },
+  { id: 'logout',        label: 'Выйти из аккаунта', icon: LogOut, kind: 'danger' },
+]
+
+export function ProfileTab() {
+  const showToast = useBookingStore((s) => s.showToast)
+
+  const [workDays, setWorkDays] = useState([true, true, true, true, true, false, false])
+  const [hours, setHours] = useState({
+    start: '09:00', end: '20:00', lunchFrom: '13:00', lunchTo: '14:00',
+  })
+
+  const [autoCancel, setAutoCancel] = useState(true)
+  const [cancelHours, setCancelHours] = useState('2')
+  const [offerWaitlist, setOfferWaitlist] = useState(true)
+
+  const [notifications, setNotifications] = useState(true)
+  const [darkTheme, setDarkTheme] = useState(false)
+
+  const [isAddServiceOpen, setIsAddServiceOpen] = useState(false)
+  const [isEditProfileOpen, setIsEditProfileOpen] = useState(false)
+
+  const [link] = useState(
+    () => `t.me/antizabivator/invite/${Math.random().toString(36).slice(2, 10)}`,
+  )
+
+  const toggleDay = (i) =>
+    setWorkDays((days) => days.map((d, idx) => (idx === i ? !d : d)))
+
+  const handleCopyLink = () => {
+    try {
+      navigator.clipboard?.writeText(link)
+      showToast('Ссылка скопирована в буфер обмена')
+    } catch {
+      showToast('Не удалось скопировать. Скопируйте вручную')
+    }
+  }
+
+  const handleLogout = () => {
+    showToast('Выход выполнен. До встречи, Педро 👋')
+  }
+
+  return (
+    <div className="pb-24">
+      {/* ===== ШАПКА ПРОФИЛЯ (кликабельный блок) ===== */}
+      <button
+        onClick={() => setIsEditProfileOpen(true)}
+        className="mb-6 flex w-full items-center gap-4 rounded-2xl text-left transition active:scale-[0.98]"
+      >
+        <div className="relative shrink-0">
+          <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-200 text-slate-400">
+            <User className="h-10 w-10" strokeWidth={1.5} />
+          </div>
+          {/* Убрали кнопку Camera */}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <h1 className="text-xl font-extrabold text-slate-900">Педро Барбер</h1>
+          <p className="mt-0.5 text-sm text-slate-400">Барбер · 6 лет опыта</p>
+          <div className="mt-1.5 flex items-center gap-1">
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            <span className="text-xs font-semibold text-emerald-600">Онлайн</span>
+          </div>
+        </div>
+
+        {/* Индикатор кликабельности */}
+        <Pencil className="h-5 w-5 shrink-0 text-slate-300" />
+      </button>
+
+      {/* ===== КАРТОЧКА АДРЕСА (кликабельный блок) ===== */}
+      <button
+        onClick={() => setIsEditProfileOpen(true)}
+        className="mb-6 flex w-full items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-sm transition active:scale-[0.98]"
+      >
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+          <MapPin className="h-5 w-5" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+            Адрес студии
+          </p>
+          <p className="mt-0.5 truncate font-bold text-slate-900">ул. Центральная, 1</p>
+        </div>
+        {/* Убрали текстовую кнопку "Изменить", поставили ChevronRight */}
+        <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
+      </button>
+
+      <div className="space-y-6">
+        {/* ===== УСЛУГИ ===== */}
+        <section>
+          <h2 className="mb-2 text-base font-bold text-slate-800">Услуги</h2>
+          <div className="rounded-2xl bg-white p-4 shadow-sm">
+            <div className="space-y-2">
+              {SERVICES_LIST.map((service) => {
+                const Icon = service.icon
+                return (
+                  <button
+                    key={service.id}
+                    className="flex w-full items-center gap-3 rounded-xl bg-slate-50 p-3 text-left transition active:scale-[0.98]"
+                  >
+                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold text-slate-900">{service.name}</span>
+                      <span className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
+                        <Clock className="h-3 w-3" />
+                        {service.duration} мин
+                      </span>
+                    </span>
+                    <span className="text-sm font-bold text-slate-900">{rub(service.price)}</span>
+                  </button>
+                )
+              })}
+            </div>
+            <button
+              onClick={() => setIsAddServiceOpen(true)}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 py-3 font-semibold text-slate-500 transition active:scale-[0.98]"
+            >
+              <Plus className="h-4 w-4" />
+              Добавить услугу
+            </button>
+          </div>
+        </section>
+
+        {/* ===== ГРАФИК РАБОТЫ ===== */}
+        <section>
+          <h2 className="mb-2 text-base font-bold text-slate-800">График работы</h2>
+          <div className="rounded-2xl bg-white p-4 shadow-sm">
+            <div className="flex flex-wrap gap-2">
+              {WEEK_TAGS.map((tag, i) => {
+                const isWeekend = i >= 7
+                const isWork = workDays[i]
+                return (
+                  <button
+                    key={tag}
+                    disabled={isWeekend}
+                    onClick={() => toggleDay(i)}
+                    className={`h-10 rounded-full px-4 text-sm font-bold transition ${
+                      isWeekend
+                        ? 'cursor-not-allowed bg-slate-100 text-slate-300'
+                        : isWork
+                          ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25 active:scale-95'
+                          : 'bg-slate-100 text-slate-400 active:scale-95'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-400">Начало дня</span>
+                <input
+                  type="time"
+                  value={hours.start}
+                  onChange={(e) => setHours((h) => ({ ...h, start: e.target.value }))}
+                  className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-center font-semibold text-slate-900 outline-none transition focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1.5 block text-xs font-semibold text-slate-400">Конец дня</span>
+                <input
+                  type="time"
+                  value={hours.end}
+                  onChange={(e) => setHours((h) => ({ ...h, end: e.target.value }))}
+                  className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3 text-center font-semibold text-slate-900 outline-none transition focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+                />
+              </label>
+            </div>
+
+            <div className="mt-3">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-400">Обед</span>
+              <div className="flex items-center gap-3">
+                <input
+                  type="time"
+                  value={hours.lunchFrom}
+                  onChange={(e) => setHours((h) => ({ ...h, lunchFrom: e.target.value }))}
+                  className="flex-1 rounded-xl border-0 bg-slate-100 px-4 py-3 text-center font-semibold text-slate-900 outline-none transition focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+                />
+                <span className="text-slate-300">—</span>
+                <input
+                  type="time"
+                  value={hours.lunchTo}
+                  onChange={(e) => setHours((h) => ({ ...h, lunchTo: e.target.value }))}
+                  className="flex-1 rounded-xl border-0 bg-slate-100 px-4 py-3 text-center font-semibold text-slate-900 outline-none transition focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ===== ПРАВИЛА ЗАПИСИ ===== */}
+        <section>
+          <h2 className="mb-2 text-base font-bold text-slate-800">Правила записи</h2>
+          <div className="rounded-2xl bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-slate-900">Авто-отмена без подтверждения</p>
+              <Toggle checked={autoCancel} onChange={setAutoCancel} />
+            </div>
+
+            {autoCancel && (
+              <div className="mt-3 animate-fade-in rounded-xl bg-slate-50 p-3">
+                <p className="text-xs leading-relaxed text-slate-500">
+                  Отменять запись, если клиент не подтвердил её за{' '}
+                  <b className="text-slate-700">{cancelHours} {cancelHours === '1' ? 'час' : 'часа'}</b>
+                </p>
+                <div className="mt-2 flex gap-2">
+                  {CANCEL_HOURS.map((h) => (
+                    <button
+                      key={h}
+                      onClick={() => setCancelHours(h)}
+                      className={`flex-1 rounded-xl py-2 text-xs font-bold transition ${
+                        cancelHours === h
+                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20'
+                          : 'bg-white text-slate-500 active:scale-95'
+                      }`}
+                    >
+                      {h} {h === '1' ? 'час' : 'часа'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 border-t border-slate-100 pt-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-900">Предлагать окно в лист ожидания</p>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    Бот сам предложит освободившееся время клиентам из очереди
+                  </p>
+                </div>
+                <Toggle checked={offerWaitlist} onChange={setOfferWaitlist} />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* ===== ПРИГЛАШЕНИЕ ===== */}
+        <section className="rounded-2xl bg-slate-900 p-4 text-white shadow-xl shadow-slate-900/20">
+          <p className="text-sm font-bold">Твоя персональная ссылка</p>
+          <p className="mt-1.5 truncate font-mono text-xs text-emerald-400">{link}</p>
+          <button
+            onClick={handleCopyLink}
+            className="mt-3 w-full rounded-xl bg-white py-3 font-bold text-slate-900 transition active:scale-[0.98]"
+          >
+            Скопировать ссылку
+          </button>
+        </section>
+
+        {/* ===== НАСТРОЙКИ ПРИЛОЖЕНИЯ ===== */}
+        <section>
+          <h2 className="mb-2 text-base font-bold text-slate-800">Настройки</h2>
+          <div className="divide-y divide-slate-100 rounded-2xl bg-white shadow-sm">
+            {APP_SETTINGS.map((item) => {
+              const Icon = item.icon
+              const isNotifications = item.id === 'notifications'
+              const isTheme = item.id === 'theme'
+
+              return (
+                <div key={item.id} className="flex items-center gap-3 p-4">
+                  <span
+                    className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                      item.kind === 'danger'
+                        ? 'bg-red-50 text-red-500'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    <Icon className="h-5 w-5" />
+                  </span>
+
+                  <span
+                    className={`min-w-0 flex-1 text-[15px] font-semibold ${
+                      item.kind === 'danger' ? 'text-red-600' : 'text-slate-900'
+                    }`}
+                  >
+                    {item.label}
+                  </span>
+
+                  {isNotifications && (
+                    <Toggle checked={notifications} onChange={setNotifications} />
+                  )}
+
+                  {isTheme && (
+                    <Toggle checked={darkTheme} onChange={setDarkTheme} />
+                  )}
+
+                  {item.kind === 'danger' && (
+                    <button
+                      onClick={handleLogout}
+                      className="shrink-0 rounded-lg bg-red-50 px-3 py-1.5 text-xs font-bold text-red-600 transition active:scale-95"
+                    >
+                      Выйти
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      </div>
+
+      {/* Модальные окна */}
+      {isAddServiceOpen && (
+        <AddServiceSheet onClose={() => setIsAddServiceOpen(false)} />
+      )}
+      {isEditProfileOpen && (
+        <EditProfileSheet onClose={() => setIsEditProfileOpen(false)} />
+      )}
+    </div>
+  )
+}
+--- FILE: ./src/page/master/QueueTab.jsx ---
+import { Clock } from 'lucide-react'
+import { useBookingStore } from '../../store/bookingStore'
+import { WAITLIST, AVATAR_GRADIENTS } from '../../mock/masterData'
+
+export function QueueTab() {
+  const showToast = useBookingStore((s) => s.showToast)
+
+  const handleOffer = (name) => {
+    showToast(`Предложение отправлено ${name}. Он получит уведомление в Telegram 🔔`)
+  }
+
+  return (
+    <div>
+      <div className="mb-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-emerald-600">
+          Очередь
+        </p>
+        <h1 className="mt-1 text-2xl font-extrabold text-slate-900">Лист ожидания</h1>
+        <p className="mt-1 text-sm text-slate-400">
+          {WAITLIST.length} клиента готовы приехать
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {WAITLIST.map((item, idx) => (
+          <div key={item.id} className="rounded-2xl bg-white p-4 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div
+                className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br ${
+                  AVATAR_GRADIENTS[idx % AVATAR_GRADIENTS.length]
+                } text-sm font-bold text-white shadow-md`}
+              >
+                {item.initials}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="font-bold text-slate-900">{item.name}</p>
+                <p className="mt-0.5 flex items-center gap-1 text-sm text-slate-400">
+                  <Clock className="h-3.5 w-3.5" />
+                  Хочет в {item.time} · встал в {item.joinedAt}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => handleOffer(item.name)}
+              className="mt-3 w-full rounded-xl bg-emerald-50 py-2.5 text-sm font-bold text-emerald-700 transition active:scale-[0.98]"
+            >
+              Предложить это окно
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+--- FILE: ./src/page/master/TodayTab.jsx ---
+import { TrendingUp } from 'lucide-react'
+import { rub } from '../../lib/currency'
+import { TODAY_APPOINTMENTS, DOT_COLORS } from '../../mock/masterData'
+
+export function TodayTab() {
+  const today = new Date()
+  const dateLabel = today.toLocaleDateString('ru-RU', {
+    day: 'numeric', month: 'long',
+  })
+
+  const total = TODAY_APPOINTMENTS.reduce(
+    (sum, a) => sum + (a.price || 0), 0,
+  )
+  const booked = TODAY_APPOINTMENTS.filter((a) => a.status !== 'free').length
+
+  return (
+    <div>
+      <div className="mb-5">
+        <p className="text-xs font-semibold uppercase tracking-widest text-emerald-600">
+          Сегодня
+        </p>
+        <h1 className="mt-1 text-2xl font-extrabold text-slate-900 capitalize">
+          Сегодня, {dateLabel}
+        </h1>
+      </div>
+
+      <div className="mb-6 flex items-center justify-between rounded-3xl bg-slate-900 p-5 text-white shadow-xl shadow-slate-900/20">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
+            Ожидаемая выручка
+          </p>
+          <p className="mt-1.5 text-2xl font-extrabold">{rub(total)}</p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            {booked} записей запланировано
+          </p>
+        </div>
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10 backdrop-blur">
+          <TrendingUp className="h-5 w-5 text-emerald-400" />
+        </div>
+      </div>
+
+      <div className="relative">
+        <div className="absolute left-3 top-3 bottom-3 w-0.5 bg-gradient-to-b from-slate-200 via-slate-200 to-transparent" />
+
+        <div className="space-y-3">
+          {TODAY_APPOINTMENTS.map((appt) => (
+            <div key={appt.time} className="relative pl-9">
+              <span
+                className={`absolute left-1.5 top-5 h-3 w-3 rounded-full border-[3px] border-[#F9FAFB] ${DOT_COLORS[appt.status]}`}
+              />
+
+              {appt.status === 'free' ? (
+                <div className="rounded-2xl border-2 border-dashed border-slate-200 bg-white/60 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    {appt.time}
+                  </p>
+                  <p className="mt-1 text-sm font-medium text-slate-400">
+                    Свободное окно
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-2xl bg-white p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                        {appt.time}
+                      </p>
+                      <p className="mt-1 text-[15px] font-bold text-slate-900">
+                        {appt.client}
+                      </p>
+                      <p className="mt-0.5 text-sm text-slate-400">{appt.service}</p>
+                    </div>
+                    <p className="shrink-0 text-[15px] font-bold text-slate-900">
+                      {rub(appt.price)}
+                    </p>
+                  </div>
+
+                  <div className="mt-3 flex items-center gap-1.5">
+                    <i className={`h-1.5 w-1.5 rounded-full ${DOT_COLORS[appt.status]}`} />
+                    <span
+                      className={`text-[11px] font-semibold ${
+                        appt.status === 'confirmed' ? 'text-emerald-700' : 'text-amber-700'
+                      }`}
+                    >
+                      {appt.status === 'confirmed' ? 'Подтверждено' : 'Ждёт подтверждения'}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+--- FILE: ./src/page/MasterPage.jsx ---
+import { useState } from 'react'
+import { TodayTab } from './master/TodayTab'
+import { QueueTab } from './master/QueueTab'
+// import { SettingsTab } from './master/SettingsTab'
+import { MasterFloatingNav } from './master/MasterFloatingNav'
+import { ProfileTab } from './master/ProfileTab'
+
+export function MasterPage() {
+  const [tab, setTab] = useState('today')
+
+  return (
+    <div className="animate-fade-up pb-28">
+      <div className="px-5 pt-6">
+        {tab === 'today'    && <TodayTab />}
+        {tab === 'queue'    && <QueueTab />}
+        {tab === 'profile' && <ProfileTab />} 
+      </div>
+      <MasterFloatingNav active={tab} onChange={setTab} />
+    </div>
+  )
+}
+--- FILE: ./src/page/ServicesPage.jsx ---
+import { useEffect, useState } from 'react'
+import { User, Star, Image } from 'lucide-react'
+import { ServiceCard } from '../components/ui/ServiceCard'
+import { ActiveBookingBar } from '../widgets/ActiveBookingBar'
+import { useBookingStore } from '../store/bookingStore'
+import { useDragScroll } from '../lib/useDragScroll'
+import { fetchServices } from '../services/api'
+
+export function ServicesPage({ onPick, onOpenDetails }) {
+  const pickService = useBookingStore((s) => s.pickService)
+  const galleryRef = useDragScroll()
+
+  const [services, setServices] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchServices()
+      .then((data) => {
+        // Проверяем, что data существует и является массивом
+        setServices(Array.isArray(data) ? data : [])
+        setLoading(false)
+      })
+      .catch((err) => {
+        console.error('Failed to load services:', err)
+        setServices([]) // Устанавливаем пустой массив при ошибке
+        setLoading(false)
+      })
+  }, [])
+
+  return (
+    <div className="animate-fade-up">
+      <div className="relative h-[280px] overflow-hidden bg-gradient-to-b from-slate-900 to-slate-700">
+        <div className="pointer-events-none absolute -top-20 left-1/2 h-56 w-56 -translate-x-1/2 rounded-full bg-emerald-500/20 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-24 -right-10 h-48 w-48 rounded-full bg-teal-400/10 blur-3xl" />
+
+        <div className="relative flex h-full flex-col items-center justify-center px-5">
+          <div className="relative">
+            <div className="flex h-24 w-24 items-center justify-center rounded-full border-4 border-white bg-gradient-to-br from-emerald-400 to-teal-600 text-white shadow-xl">
+              <User className="h-12 w-12" />
+            </div>
+            <span className="absolute bottom-1 right-1 h-4 w-4 rounded-full border-[3px] border-slate-900 bg-emerald-400" />
+          </div>
+          <h1 className="mt-4 text-2xl font-bold text-white">Педро Барбер</h1>
+          <span className="mt-2.5 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white backdrop-blur">
+            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+            4.9 · 6 лет опыта
+          </span>
+        </div>
+      </div>
+
+      <div className="relative -mt-8 rounded-t-3xl bg-[#F9FAFB] pb-10">
+        <div className="mx-auto mt-3 h-1.5 w-12 rounded-full bg-slate-200" />
+
+        <h2 className="mt-6 px-5 text-lg font-bold text-slate-900">Примеры работ</h2>
+        <div
+          ref={galleryRef}
+          className="thin-scrollbar mt-3 flex cursor-grab snap-x snap-mandatory select-none gap-3 scroll-pl-5 overflow-x-auto px-5 pb-2 active:cursor-grabbing"
+        >
+          {[1, 2, 3, 4].map((n) => (
+            <div
+              key={n}
+              className="flex h-32 w-40 shrink-0 snap-start items-center justify-center rounded-2xl bg-gradient-to-br from-slate-200 to-slate-300"
+            >
+              <Image className="h-8 w-8 text-slate-400/70" strokeWidth={1.5} />
+            </div>
+          ))}
+        </div>
+
+        <h2 className="mt-6 px-5 text-lg font-bold text-slate-900">Услуги</h2>
+        <div className="mt-3 px-5">
+          {loading ? (
+            <div className="py-8 text-center text-sm text-slate-400">Загрузка...</div>
+          ) : (
+            services.map((service) => (
+              <ServiceCard
+                key={service.id}
+                service={{
+                  id: service.id,
+                  name: service.name,
+                  price: service.price,
+                  duration: service.duration_min,
+                  icon: User, // или другая иконка по вашему выбору
+                }}
+                onClick={() => {
+                  pickService({
+                    id: service.id,
+                    name: service.name,
+                    price: service.price,
+                    duration: service.duration_min,
+                    icon: User,
+                  })
+                  onPick()
+                }}
+              />
+            ))
+          )}
+        </div>
+      </div>
+
+      <ActiveBookingBar onOpenDetails={onOpenDetails} />
+    </div>
+  )
+}
+--- FILE: ./src/services/api.js ---
+import axios from 'axios'
+
+const API_BASE = 'http://localhost:8080/api/v1'
+const INVITE_LINK = 'LINK1'
+
+const api = axios.create({
+  baseURL: API_BASE,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+})
+
+/**
+ * Получить список услуг мастера
+ */
+export async function fetchServices() {
+  const { data } = await api.get(`/master/${INVITE_LINK}/services`)
+  return data
+}
+
+/**
+ * Получить доступные слоты на указанную дату
+ * @param {string} date - формат YYYY-MM-DD
+ */
+export async function fetchSlots(date) {
+  const { data } = await api.get(`/master/${INVITE_LINK}/slots`, {
+    params: { date },
+  })
+  return data
+}
+
+/**
+ * Забронировать слот
+ * @param {Object} params - { slot_id, service_id, name, price }
+ */
+export async function bookSlot(params) {
+  const { data } = await api.post('/book', params, {
+    headers: {
+      'X-Telegram-Init-Data': 'test-vasya',
+    },
+  })
+  return data
+}
+--- FILE: ./src/store/bookingStore.js ---
+import { create } from 'zustand'
+import { toISO, TODAY } from '../lib/dates'
+import { makeMockActiveBooking } from '../mock/makeMockActiveBooking'
+
+export const useBookingStore = create((set) => ({
+  service: null,
+  selectedDate: toISO(TODAY),
+  myBookings: {},
+  waitlist: {},
+  toast: null,
+  activeBooking: makeMockActiveBooking(),
+
+  pickService: (service) => set({ service, selectedDate: toISO(TODAY) }),
+  setDate: (iso) => set({ selectedDate: iso }),
+  bookSlot: (key) => set((s) => ({ myBookings: { ...s.myBookings, [key]: true } })),
+  joinWaitlist: (iso) => set((s) => ({ waitlist: { ...s.waitlist, [iso]: true } })),
+  showToast: (text) => set({ toast: { id: Date.now(), text } }),
+  hideToast: () => set({ toast: null }),
+  cancelActiveBooking: () => set({ activeBooking: null }),
+}))
+--- FILE: ./src/widgets/ActiveBookingBar.jsx ---
+import { useEffect, useState } from 'react'
+import { Scissors, ChevronRight } from 'lucide-react'
+import { useBookingStore } from '../store/bookingStore'
+import { getBookingTimeLabel } from '../lib/dates'
+
+export function ActiveBookingBar({ onOpenDetails }) {
+  const activeBooking = useBookingStore((s) => s.activeBooking)
+  const [now, setNow] = useState(() => new Date())
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  if (!activeBooking) return null
+
+  return (
+    <button
+      onClick={onOpenDetails}
+      className="fixed bottom-4 left-1/2 z-40 w-[calc(100%-2.5rem)] max-w-[380px] -translate-x-1/2 animate-fade-up"
+    >
+      <div className="flex items-center justify-between rounded-2xl bg-slate-900 p-3.5 text-white shadow-2xl">
+        <span className="flex shrink-0 items-center justify-center rounded-full bg-white/10 p-2">
+          <Scissors className="h-5 w-5 text-emerald-400" />
+        </span>
+        <span className="mx-3 flex min-w-0 flex-1 flex-col items-start text-left">
+          <span className="text-xs font-bold text-emerald-400">
+            {getBookingTimeLabel(activeBooking.date, now)}
+          </span>
+          <span className="w-full truncate text-sm font-semibold">
+            {activeBooking.service}, {activeBooking.time}
+          </span>
+        </span>
+        <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />
+      </div>
+    </button>
+  )
+}
+--- FILE: ./src/widgets/WaitlistBlock.jsx ---
+import { Frown, CheckCircle2 } from 'lucide-react'
+import { useBookingStore } from '../store/bookingStore'
+
+export function WaitlistBlock({ iso }) {
+  const joined = useBookingStore((s) => !!s.waitlist[iso])
+  const joinWaitlist = useBookingStore((s) => s.joinWaitlist)
+  const showToast = useBookingStore((s) => s.showToast)
+
+  const handleJoin = () => {
+    joinWaitlist(iso)
+    showToast('Ты в листе ожидания! Бот напишет, как только появится окно 🔔')
+  }
+
+  return (
+    <div className="animate-fade-in rounded-2xl border border-slate-100 bg-white p-6 shadow-card">
+      <div className="flex flex-col items-center text-center">
+        <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-slate-100">
+          <Frown className="h-8 w-8 text-slate-400" />
+        </div>
+        <p className="text-lg font-bold">На этот день всё занято</p>
+        <p className="mt-1.5 max-w-[260px] text-sm leading-relaxed text-slate-400">
+          Оставь заявку — если место освободится, бот сразу напишет тебе
+        </p>
+      </div>
+
+      {joined ? (
+        <div className="mt-5 flex animate-pop-in items-start gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3.5 text-sm font-medium leading-snug text-emerald-800">
+          <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+          Ты в списке! Если кто-то отменит, бот пришлет тебе сообщение
+        </div>
+      ) : (
+        <button
+          onClick={handleJoin}
+          className="mt-5 w-full rounded-xl bg-emerald-600 px-4 py-4 text-[15px] font-bold leading-snug text-white shadow-lg shadow-emerald-600/25 transition active:scale-[0.98]"
+        >
+          Встать в лист ожидания на этот день
+        </button>
+      )}
+    </div>
+  )
+}
+--- FILE: ./tailwind.config.js ---
+/** @type {import('tailwindcss').Config} */
+export default {
+    content: ['./index.html', './src/**/*.{js,jsx}'],
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+        },
+        boxShadow: {
+          card: '0 1px 2px rgba(16,24,40,.05), 0 4px 16px -4px rgba(16,24,40,.07)',
+        },
+        keyframes: {
+          'fade-in': { from: { opacity: '0' }, to: { opacity: '1' } },
+          'fade-up': { from: { opacity: '0', transform: 'translateY(10px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
+          'slide-up': { from: { transform: 'translateY(100%)' }, to: { transform: 'translateY(0)' } },
+          'pop-in': { '0%': { transform: 'scale(.6)', opacity: '0' }, '100%': { transform: 'scale(1)', opacity: '1' } },
+          'toast-in': { from: { opacity: '0', transform: 'translateY(14px) scale(.96)' }, to: { opacity: '1', transform: 'translateY(0) scale(1)' } },
+        },
+        animation: {
+          'fade-in': 'fade-in .25s ease-out both',
+          'fade-up': 'fade-up .3s ease-out both',
+          'slide-up': 'slide-up .35s cubic-bezier(.16,1,.3,1) both',
+          'pop-in': 'pop-in .35s cubic-bezier(.34,1.56,.64,1) both',
+          'toast-in': 'toast-in .3s ease-out both',
+        },
+      },
+    },
+    plugins: [],
+  }
+--- FILE: ./vite.config.js ---
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [react()],
+})
+
+
+
