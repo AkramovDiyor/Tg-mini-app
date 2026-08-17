@@ -32,7 +32,7 @@ func GetTestBooking(slotID, serviceID int64) Booking {
 		ServiceID:        serviceID,
 		ClientTelegramID: 987654321,
 		ClientName:       "Алексей",
-		PriceLocked:      1500, // Цена зафиксирована, даже если мастер поднимет прайс
+		PriceLocked:      1500, 
 		Status:           BookingStatusActive,
 		CreatedAt:        time.Now(),
 		UpdatedAt:        time.Now(),

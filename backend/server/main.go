@@ -4,194 +4,288 @@ import (
 	"backend/internal/config"
 	"backend/internal/models"
 	"backend/internal/repositories"
-	"backend/internal/service"
+	service "backend/internal/services"
 	"backend/pkg/database"
+	"backend/pkg/telegram"
 	"context"
-	"time"
-
-	// "internal/poll"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"log"
+	"net/url"
+	"sort"
+	"strings"
+	"time"
 )
 
 func main() {
-	// 1. Загружаем переменные из .env
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
+    cfg, err := config.Load()
+    if err != nil {
+        log.Fatalf("%v", err)
+    }
 
-	// 2. Создаем тот самый pool (электростанцию)
-	pool, err := database.NewPostgres(cfg)
-	if err != nil {
-		log.Fatalf("%v", err)
-	}
-	defer pool.Close() // Закроет соединения, когда сервер выключится
+    pool, err := database.NewPostgres(cfg)
+    if err != nil {
+        log.Fatalf("%v", err)
+    }
+    defer pool.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    // Контекст живет 10 секунд, чтобы успеть всё протестить
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel() // СТОИТ СРАЗУ ПОСОСЛЕ СОЗДАНИЯ!
 
-	// 4. Передаем pool в репозиторий!
-	masterRepo := repositories.NewMasterRepo(pool)
+    // --- 1. МАСТЕР ---
+    masterRepo := repositories.NewMasterRepo(pool)
+    targetLink := "LINK////123243"
+    
+    savedMaster, err := masterRepo.GetMasterByInviteLink(ctx, targetLink)
+    if err != nil {
+        log.Println("Мастер не найден, создаем нового...")
+        testMaster := models.Get()
+        testMaster.InviteLink = targetLink
+        testMaster.TelegramID = time.Now().UnixNano() // Делаем уникальным
 
-	testMaster := models.Get()
-	testMaster.InviteLink = "LINK////1232431212"
-	testMaster.TelegramID = time.Now().UnixNano()
+        if err = masterRepo.CreateMaster(ctx, testMaster); err != nil {
+            log.Fatalf("Ошибка создания мастера: %v", err)
+        }
+        savedMaster, err = masterRepo.GetMasterByInviteLink(ctx, targetLink)
+        if err != nil {
+            log.Fatalf("Критическая ошибка: %v", err)
+        }
+    }
+    log.Printf("Работаем с мастером: %s (ID: %d)\n", savedMaster.Name, savedMaster.ID)
 
-	err = masterRepo.CreateMaster(ctx, testMaster)
-	if err != nil {
-		log.Fatalf("Ошибка создания: %v", err)
-	}
-	log.Println("Мастер успешно создан!")
+    // --- 2. УСЛУГА ---
+    serviceRepo := repositories.NewServiceRepo(pool)
+    services, _ := serviceRepo.GetServicesByMasterID(ctx, savedMaster.ID)
+    var serviceID int64
+    if len(services) == 0 {
+        log.Println("Услуг нет, создаем...")
+        testService := models.Service{
+            MasterID:    savedMaster.ID,
+            Name:        "Мужская стрижка",
+            DurationMin: 45,
+            Price:       1500,
+        }
+        if err = serviceRepo.CreateService(ctx, testService); err != nil {
+            log.Fatalf("Ошибка создания услуги: %v", err)
+        }
+        services, _ = serviceRepo.GetServicesByMasterID(ctx, savedMaster.ID)
+    }
+    serviceID = services[0].ID
+    log.Printf("Используем услугу: %s (ID: %d)\n", services[0].Name, serviceID)
 
-	savedMaster, err := masterRepo.GetMasterByInviteLink(ctx, "LINK////123243")
-	if err != nil {
-		log.Fatalf("Ошибка чтения по ссылке: %v", err)
-	}
 
-	// Выводим имя прочитанного мастера, чтобы убедиться, что данные совпали
-	log.Printf("Успешно прочитали из базы! Имя мастера: %s, ID в базе: %d", savedMaster.Name, savedMaster.ID)
+    // --- 3. КЛИЕНТЫ ---
+    clientRepo := repositories.NewClientRepo(pool)
+    
+    // Регистрируем (или берем старых)
+    _, err = clientRepo.GetOrCreateClient(ctx, 777111222, "@vasy1", "Вася 1")
+    if err != nil { log.Fatalf("Ошибка GetOrCreate для Васи 1: %v", err) }
+    
+    _, err = clientRepo.GetOrCreateClient(ctx, 888999000, "@vasy2", "Вася 2")
+    if err != nil { log.Fatalf("Ошибка GetOrCreate для Васи 2: %v", err) }
 
-	// serviceRepo := repositories.NewServiceRepo(pool)
+    log.Println("👥 Клиенты зарегистрированы. Проверяем GetClientByTelegramID...")
 
-	// 2. Создаем тестовую услугу для нашего сохраненного мастера
-	// Берем savedMaster.ID, который нам только что вернул Postgres!
-	// testService := models.Service{
-	// 	MasterID:    savedMaster.ID,
-	// 	Name:        "Мужская стрижка",
-	// 	DurationMin: 45,
-	// 	Price:       1500,
-	// }
+    // ТЕСТ 1: Ищем реального Васю №1
+    foundClient, err := clientRepo.GetClientByTelegramID(ctx, 777111222)
+    if err != nil {
+        log.Fatalf("❌ Ошибка: не смогли найти существующего Васю 1: %v", err)
+    }
+    log.Printf("🔍 Чистый поиск успешен! Из базы прочитан клиент: %s (Ник: %s, Страйков: %d, Забанен: %v)\n", 
+        foundClient.FirstName, foundClient.Username, foundClient.StrikesCount, foundClient.IsBanned)
 
-	// 3. Тестируем создание услуги
-	// err = serviceRepo.CreateService(ctx, testService)
-	// if err != nil {
-	// 	log.Fatalf("Ошибка создания услуги: %v", err)
-	// }
-	// log.Println("✂️ Услуга успешно создана!")
+    // ТЕСТ 2: Ищем несуществующего фантома (Проверка правильной обработки ошибки ErrNoRows)
+    fakeID := int64(999000999)
+    _, err = clientRepo.GetClientByTelegramID(ctx, fakeID)
+    if err == nil {
+        log.Fatalf("❌ Критическая ошибка архитектуры! Метод Get нашел несуществующего клиента с ID %d", fakeID)
+    } else {
+        log.Printf("🔍 Проверка ошибок успешна! При поиске фантома система выдала правильный отказ: %v\n", err)
+    }
 
-	// 4. Тестируем получение списка услуг этого мастера
-	// services, err := serviceRepo.GetServicesByMasterID(ctx, savedMaster.ID)
-	// if err != nil {
-	// 	log.Printf("Ошибка получения услуг: %v", err)
-	// }
+    // --- 4. СЛОТ ---
+    slotRepo := repositories.NewSlotRepo(pool)
+    now := time.Now()
+    
+    // Вместо фиксированных 15:00 делаем время динамическим, 
+    // чтобы при каждом запуске создавался УНИКАЛЬНЫЙ новый слот!
+    // Добавим текущую минуту и секунду запуска
+    slotStart := time.Date(now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second(), 0, time.Local)
+    
+    testSlot := models.Slot{
+        MasterID:  savedMaster.ID,
+        StartTime: slotStart,
+        EndTime:   slotStart.Add(45 * time.Minute),
+        Status:    "free",
+    }
+    
+    // Пытаемся создать
+    err = slotRepo.CreateSlot(ctx, testSlot) 
+    if err != nil {
+        log.Fatalf("Не удалось создать чистый слот для теста: %v", err)
+    }
+    
+    // Получаем именно этот только что созданный нами свежий слот!
+    slots, _ := slotRepo.GetSlotsByMasterAndDate(ctx, savedMaster.ID, now)
+    if len(slots) == 0 {
+        log.Fatalf("Слоты не найдены!")
+    }
+    
+    // Берем самый последний созданный слот из массива
+    freshSlot := slots[len(slots)-1]
+    slotID := freshSlot.ID
+    log.Printf("Используем НОВЫЙ чистый слот ID: %d (Статус: %s)\n", slotID, freshSlot.Status)
 
-	// log.Printf("📚 Успешно! Найдено услуг у мастера: %d", len(services))
-	// for _, s := range services {
-	// 	log.Printf(" - %s (%d мин) — %d ₽", s.Name, s.DurationMin, s.Price)
-	// }
 
-	// ==========================================
-	// ТЕСТ РЕПОЗИТОРИЯ СЛОТОВ (SlotRepo)
-	// ==========================================
+    // --- 5. БИЗНЕС-ЛОГИКА (BookingService) ---
+    bookingRepo := repositories.NewBookingRepo(pool)
+    bookingService := service.NewBookingService(pool, slotRepo, bookingRepo)
 
-	// 1. Инициализируем репозиторий слотов
-	// slotRepo := repositories.NewSlotRepo(pool)
+    log.Println("=> Попытка записи Васи №1...")
+    err = bookingService.BookSlot(ctx, slotID, serviceID, 777111222, "Вася 1", 1500)
+    if err != nil {
+        log.Fatalf("❌ Ошибка записи Васи №1: %v", err)
+    }
+    log.Println("✅ Вася №1 успешно записан!")
 
-	// 2. Создаем временные точки на СЕГОДНЯ
-	// Пусть первый слот будет сегодня в 15:00
-	// now := time.Now()
-	// slotStart := time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, time.Local)
-	// slotEnd := slotStart.Add(45 * time.Minute) // Длительность 45 минут
+    log.Println("=> Попытка записи Вася №2 на тот же слот...")
+    err = bookingService.BookSlot(ctx, slotID, serviceID, 888999000, "Вася 2", 1500)
+    if err != nil {
+        log.Printf("✅ Система отработала верно! Отказ Вася №2: %v", err)
+    } else {
+        log.Fatalf("❌ КРИТИЧЕСКАЯ ОШИБКА! Вася №2 записался на занятый слот!")
+    }
 
-	// testSlot := models.Slot{
-	// 	MasterID:  savedMaster.ID, // Привязываем к нашему мастеру из базы
-	// 	StartTime: slotStart,
-	// 	EndTime:   slotEnd,
-	// 	Status:    "free", // Слот свободен для записи
-	// }
 
-	// // 3. Тестируем создание слота
-	// // Оборачиваем в проверку, так как при повторном запуске база может выдать ошибку
-	// // из-за нашего триггера EXCLUDE (защиты от пересечений слотов), и это нормально!
-	// err = slotRepo.CreateSlot(ctx, testSlot)
-	// if err != nil {
-	// 	log.Printf("Предупреждение при создании слота (возможно, уже существует или пересекается): %v", err)
-	// } else {
-	// 	log.Println("📅 Слот расписания успешно создан!")
-	// }
+        // =================================================================
+    // --- 6. ТЕСТИРОВАНИЕ АВТО-ЗАБИВАТОРА (WaitlistService) ---
+    // =================================================================
+    log.Println("\n⏳ --- Начинаем интеграционный тест Листа Ожидания ---")
 
-	// // 4. Тестируем получение слотов на сегодняшний день
-	// // Передаем текущее время (метод сам сбросит часы до 00:00:00)
-	// slots, err := slotRepo.GetSlotsByMasterAndDate(ctx, savedMaster.ID, now)
-	// if err != nil {
-	// 	log.Fatalf("Ошибка получения слотов: %v", err)
-	// }
+    // 1. Инициализируем репозиторий и сервис листа ожидания
+    waitlistRepo := repositories.NewWaitlistRepo(pool)
+    waitlistService := service.NewWaitlistService(pool, slotRepo, waitlistRepo)
 
-	// log.Printf("📊 Успешно! Найдено слотов на сегодня у мастера: %d", len(slots))
-	// for _, slot := range slots {
-	// 	log.Printf(" - Слот №%d: %s -> %s [Статус: %s]",
-	// 		slot.ID,
-	// 		slot.StartTime.Format("15:04"),
-	// 		slot.EndTime.Format("15:04"),
-	// 		slot.Status,
-	// 	)
-	// }
+    // Задаем целевую дату (сегодняшний день, обнуленный до начала дня для Листа Ожидания)
+    desiredDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
 
-	// ==========================================
-	// ТЕСТ БИЗНЕС-ЛОГИКИ (BookingService)
-	// ==========================================
+    // 2. Вася №2 видит, что мест нет, и решает встать в очередь на сегодня
+    log.Printf("➡️  Вася №2 (%d) встает в лист ожидания на дату: %s\n", 888999000, desiredDate.Format("2006-01-02"))
+    err = waitlistService.JoinWaitlist(ctx, savedMaster.ID, 888999000, desiredDate)
+    if err != nil {
+        log.Fatalf("❌ Ошибка при добавлении Вася №2 в лист ожидания: %v", err)
+    }
+    log.Println("✅ Вася №2 успешно добавлен в очередь со статусом 'waiting'.")
 
-	// 1. Инициализируем репозитории
-	slotRepo := repositories.NewSlotRepo(pool)
-	serviceRepo := repositories.NewServiceRepo(pool)
-	bookingRepo := repositories.NewBookingRepo(pool)
+    // 3. Симулируем действия мастера: он открывает новое окно (например, вечерний слот в 18:00)
+    log.Println("📅 Мастер открывает новое свободное окно на 18:00...")
+    newSlotStart := time.Date(now.Year(), now.Month(), now.Day(), 18, 0, 0, 0, time.Local)
+    newSlot := models.Slot{
+        MasterID:  savedMaster.ID,
+        StartTime: newSlotStart,
+        EndTime:   newSlotStart.Add(45 * time.Minute),
+        Status:    "free",
+    }
 
-	// 2. Инициализируем СЕРВИС (Мозг)
-	bookingService := service.NewBookingService(pool, slotRepo, bookingRepo)
+    err = slotRepo.CreateSlot(ctx, newSlot)
+    if err != nil {
+        log.Fatalf("❌ Не удалось создать новый свободный слот для теста: %v", err)
+    }
 
-	// 3. Подготавливаем данные (Услуга и Слот)
-	// Создаем услугу
-	testService := models.Service{
-		MasterID:    savedMaster.ID,
-		Name:        "Мужская стрижка",
-		DurationMin: 45,
-		Price:       1500,
-	}
-	err = serviceRepo.CreateService(ctx, testService)
-	if err != nil {
-		log.Fatalf("Ошибка создания услуги: %v", err)
-	}
-	services, _ := serviceRepo.GetServicesByMasterID(ctx, savedMaster.ID)
-	serviceID := services[0].ID // Берем ID первой услуги
+    // Читаем этот новый слот из базы, чтобы узнать его сгенерированный ID
+    freshSlots, _ := slotRepo.GetSlotsByMasterAndDate(ctx, savedMaster.ID, now)
+    var newSlotID int64
+    for _, s := range freshSlots {
+        if s.StartTime.Hour() == 18 {
+            newSlotID = s.ID
+            break
+        }
+    }
+    log.Printf("🆕 Создан новый слот! ID в базе данных: %d\n", newSlotID)
 
-	// Создаем слот на сегодня 15:00
-	now := time.Now()
-	slotStart := time.Date(now.Year(), now.Month(), now.Day(), 15, 0, 0, 0, time.Local)
-	testSlot := models.Slot{
-		MasterID:  savedMaster.ID,
-		StartTime: slotStart,
-		EndTime:   slotStart.Add(45 * time.Minute),
-		Status:    "free",
-	}
+    // 4. Срабатывает триггер автоматики: передаем новое освободившееся окно первому в очереди
+    log.Println("🤖 Авто-забиватор ищет первого клиента в очереди, чтобы предложить ему слот...")
+    err = waitlistService.OfferSlotToFirstInLine(ctx, savedMaster.ID, newSlotID, desiredDate)
+    if err != nil {
+        log.Fatalf("❌ Ошибка при передаче слота очереди: %v", err)
+    }
+    log.Println("⚡ Робот обработал очередь!")
 
-	// Если слот уже есть (при повторном запуске), просто получим его
-	err = slotRepo.CreateSlot(ctx, testSlot)
-	if err != nil {
-		log.Printf("Слот уже существует (это ок): %v", err)
-	}
-	slots, _ := slotRepo.GetSlotsByMasterAndDate(ctx, savedMaster.ID, now)
-	if len(slots) == 0 {
-		log.Fatalf("Слоты не найдены, нечего бронировать!")
-	}
-	slotID := slots[0].ID // Берем ID первого слота на сегодня
+    // 5. ПРОВЕРКА РЕЗУЛЬТАТА: Чисто читаем заявку из базы через репозиторий, чтобы убедиться в успехе
+    log.Println("🔍 Проверяем изменения статуса заявки в базе данных...")
+    checkReq, err := waitlistRepo.GetFirstInWaitlist(ctx, savedMaster.ID, desiredDate)
+    
+    // Внимание: так как метод GetFirstInWaitlist ищет только со статусом 'waiting', 
+    // после успешного срабатывания сервиса статус изменился на 'offered', поэтому метод вернет pgx.ErrNoRows.
+    // И это доказывает, что активных заявок в статусе ожидания БОЛЬШЕ НЕТ!
+    if err != nil && err.Error() == "no rows in result set" {
+        log.Println("🎉 УСПЕХ! В очереди больше нет клиентов со статусом 'waiting'!")
+        log.Println("🎉 Система успешно перевела Васю №2 в статус 'offered' и закрепила за ним слот №", newSlotID)
+    } else if err != nil {
+        log.Fatalf("❌ Произошла непредвиденная ошибка при проверке базы: %v", err)
+    } else {
+        log.Fatalf("❌ КРИТИЧЕСКИЙ БАГ! Заявка осталась в статусе 'waiting', автоматика проигнорировала клиента! ID клиента в базе: %d", checkReq.ClientTelegramID)
+    }
 
-	// 4. САМОЕ ГЛАВНОЕ: ПЫТАЕМСЯ ЗАПИСАТЬ КЛИЕНТА (Вася №1)
-	log.Println("=> Попытка записи Васи №1...")
-	err = bookingService.BookSlot(ctx, slotID, serviceID, 777111222) // 777111222 - Telegram ID Васи
-	if err != nil {
-		log.Fatalf("❌ Ошибка записи Васи №1: %v", err)
-	}
-	log.Println("✅ Вася №1 успешно записан! Слот заблокирован.")
+    log.Println("🏁 --- Все интеграционные тесты ядра системы ZABVATOR успешно пройдены! ---")
 
-	// 5. ПЫТАЕМСЯ ЗАПИСАТЬ ВТОРОГО КЛИЕНТА НА ТОТ ЖЕ СЛОТ (Вася №2)
-	log.Println("=> Попытка записи Васи №2 на тот же слот...")
-	err = bookingService.BookSlot(ctx, slotID, serviceID, 888999000) // 888999000 - Telegram ID второго Васи
-	if err != nil {
-		// Мы ЖДЕМ эту ошибку! Система должна сказать "слот уже занят"
-		log.Printf("✅ Система отработала верно! Отказ Вася №2: %v", err)
-	} else {
-		log.Fatalf("❌ КРИТИЧЕСКАЯ ОШИБКА! Вася №2 записался на занятый слот!")
-	}
 
-	defer cancel()
+        // =================================================================
+    // --- ТЕСТ АВТОРИЗАЦИИ TELEGRAM (initData) ---
+    // =================================================================
+    log.Println("\n🔐 --- Тест авторизации Telegram ---")
+
+    // Токен твоего бота (бери из .env или вставь строкой для теста)
+    botToken := cfg.TgBotToken 
+    
+    // Фейковые данные пользователя Васи
+    fakeUser := telegram.WebAppUser{
+        ID:        777111222,
+        FirstName: "Вася",
+        Username:  "vasya_test",
+    }
+    userJSON, _ := json.Marshal(fakeUser)
+
+    // Собираем параметры initData (кроме hash)
+    params := url.Values{}
+    params.Set("query_id", "AAHdF6IQAAAAAN0XohDhrOrc")
+    params.Set("user", string(userJSON))
+    params.Set("auth_date", "1694000000")
+
+    // 1. Формируем data-check-string
+    var keys []string
+    for k := range params { keys = append(keys, k) }
+    sort.Strings(keys)
+    var dataCheckStrings []string
+    for _, k := range keys {
+        dataCheckStrings = append(dataCheckStrings, fmt.Sprintf("%s=%s", k, params.Get(k)))
+    }
+    dataCheckString := strings.Join(dataCheckStrings, "\n")
+
+    // 2. Считаем реальный hash, чтобы подделать валидный initData
+    secretKey := hmac.New(sha256.New, []byte("WebAppData"))
+    secretKey.Write([]byte(botToken))
+    secretKeyBytes := secretKey.Sum(nil)
+
+    h := hmac.New(sha256.New, secretKeyBytes)
+    h.Write([]byte(dataCheckString))
+    validHash := hex.EncodeToString(h.Sum(nil))
+
+    // Собираем финальную строку initData
+    fakeInitData := fmt.Sprintf("query_id=AAHdF6IQAAAAAN0XohDhrOrc&user=%s&auth_date=1694000000&hash=%s", url.QueryEscape(string(userJSON)), validHash)
+
+    log.Printf("Сгенерирован фейковый initData: %s", fakeInitData)
+
+    // 3. САМОЕ ГЛАВНОЕ: Вызываем нашу функцию проверки!
+    tgID, err := telegram.ValidateInitDate(fakeInitData, botToken)
+    if err != nil {
+        log.Fatalf("❌ Ошибка валидации: %v", err)
+    }
+
+    log.Printf("✅ Валидация успешна! Извлечен Telegram ID: %d", tgID)
 
 }

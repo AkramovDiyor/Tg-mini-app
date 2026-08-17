@@ -1,4 +1,4 @@
-package service
+package services
 
 import (
 	"backend/internal/models"
@@ -24,7 +24,7 @@ func NewBookingService(pool *pgxpool.Pool, slotRepo repositories.SlotRepository,
 	}
 }
 
-func (s *BookingService) BookSlot(ctx context.Context, slotID int64, serviceID int64, clientTelegramID int64) error {
+func (s *BookingService) BookSlot(ctx context.Context, slotID int64, serviceID int64, clientTelegramID int64, clientName string, priceLocked int) error {
 	tx, err := s.pool.Begin(ctx)
 
 	if err != nil {
@@ -45,7 +45,7 @@ func (s *BookingService) BookSlot(ctx context.Context, slotID int64, serviceID i
 
 	if slot.Status != "free" {
 		err = errors.New("слот уже занят")
-		return  err
+		return err
 	}
 
 	err = s.slotRepo.UpdateSlotStatus(ctx, tx, slotID, "booked")
@@ -57,6 +57,8 @@ func (s *BookingService) BookSlot(ctx context.Context, slotID int64, serviceID i
 		SlotID:           slotID,
 		ServiceID:        serviceID,
 		ClientTelegramID: clientTelegramID,
+		ClientName:       clientName,  // Добавили
+		PriceLocked:      priceLocked, // Добавили
 		Status:           "active",
 	}
 	err = s.bookingRepo.CreateBooking(ctx, tx, newBooking)
@@ -70,5 +72,5 @@ func (s *BookingService) BookSlot(ctx context.Context, slotID int64, serviceID i
 	}
 
 	log.Println("Клиент успешно записан!")
-    return nil
+	return nil
 }

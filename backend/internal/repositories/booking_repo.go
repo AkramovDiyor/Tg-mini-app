@@ -17,7 +17,6 @@ type BookingRepo struct {
 	db *pgxpool.Pool
 }
 
-// 1. ИСПРАВЛЕНО: Теперь конструктор принимает пул (как NewSlotRepo и NewServiceRepo)
 func NewBookingRepo(db *pgxpool.Pool) *BookingRepo {
 	return &BookingRepo{
 		db: db,
@@ -26,10 +25,19 @@ func NewBookingRepo(db *pgxpool.Pool) *BookingRepo {
 
 // Метод создания бронирования (остался без изменений)
 func (b *BookingRepo) CreateBooking(ctx context.Context, tx pgx.Tx, booking models.Booking) error {
-	query := `INSERT INTO bookings (slot_id, service_id, client_tg_id, status) VALUES ($1, $2, $3, $4)`
-	
-	_, err := tx.Exec(ctx, query, booking.SlotID, booking.ServiceID, booking.ClientTelegramID, booking.Status)
-	return err
+    query := `INSERT INTO bookings 
+        (slot_id, service_id, client_telegram_id, client_name, price_locked, status) 
+        VALUES ($1, $2, $3, $4, $5, $6)`
+    
+    _, err := tx.Exec(ctx, query, 
+        booking.SlotID, 
+        booking.ServiceID, 
+        booking.ClientTelegramID, 
+        booking.ClientName,    
+        booking.PriceLocked,  
+        booking.Status,
+    )
+    return err
 }
 
 // 2. ИСПРАВЛЕНО: Добавлен недостающий метод, который требовал компилятор
@@ -37,7 +45,7 @@ func (b *BookingRepo) GetBookingBySlotID(ctx context.Context, slotID int64) (mod
 	var booking models.Booking
 
 	query := `
-		SELECT id, slot_id, service_id, client_tg_id, status, created_at 
+		SELECT id, slot_id, service_id, client_telegram_id, status, created_at 
 		FROM bookings 
 		WHERE slot_id = $1
 	`

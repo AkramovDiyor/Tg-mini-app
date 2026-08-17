@@ -22,19 +22,3 @@ type WaitlistRequest struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
-// Тестовая функция для демонстрации заявки
-func GetTestWaitlist(masterID int64) WaitlistRequest {
-	// Обнуляем время до начала дня, оставляя только дату
-	today := time.Now().Truncate(24 * time.Hour)
-
-	return WaitlistRequest{
-		ID:               1,
-		MasterID:         masterID,
-		ClientTelegramID: 555666777,
-		DesiredDate:      today,
-		Status:           WaitlistStatusWaiting,
-		OfferedSlotID:    nil, // Изначально слота нет, поле запишется в БД как NULL
-		CreatedAt:        time.Now(),
-		UpdatedAt:        time.Now(),
-	}
-}
