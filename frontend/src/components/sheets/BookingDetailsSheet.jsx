@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { User, MapPin } from 'lucide-react'
+import { User, MapPin, Clock } from 'lucide-react'
 import { SheetShell } from './SheetShell'
 import { getBookingTimeLabel } from '../../lib/dates'
 
@@ -40,6 +40,11 @@ export function BookingDetailsSheet({ booking, onClose, onCancel }) {
           </p>
         </div>
       </div>
+
+      <p className="mt-3 flex items-start gap-1.5 px-2 text-[11px] leading-relaxed text-slate-400">
+        <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        За 2 часа до начала придёт кнопка подтверждения. Если не нажать — запись может быть передана другому.
+      </p>
 
       <button
         onClick={() => onCancel(booking.booking_id)}

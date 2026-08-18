@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE = 'http://localhost:8080/api/v1'
+const API_BASE = 'http://10.21.33.135/api/v1'
 const INVITE_LINK = 'LINK123243'
 
 const api = axios.create({
@@ -41,7 +41,8 @@ export async function fetchClientBookings() {
 }
 
 export async function cancelBooking(bookingId) {
-  const { data } = await api.delete(`/bookings/${bookingId}`, {
+  const { data } = await api.post(`/client/bookings/${bookingId}/cancel`, {},
+    {
     headers: {
       'X-Telegram-Init-Data': 'test-vasya',
     },
