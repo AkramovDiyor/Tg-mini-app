@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const API_BASE = 'http://10.21.33.135/api/v1'
+const API_BASE = 'https://312869f2ba826d.lhr.life/api/v1';
 const INVITE_LINK = 'LINK123243'
 
 const api = axios.create({
