@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { SheetShell } from './SheetShell'
 import { useBookingStore } from '../../store/bookingStore'
+import { createService } from '../../services/api'
 
 const DURATION_OPTIONS = [
   { label: '15 мин', minutes: 15 },
@@ -11,8 +12,9 @@ const DURATION_OPTIONS = [
   { label: '2 ч',    minutes: 120 },
 ]
 
-export function AddServiceSheet({ onClose }) {
+export function AddServiceSheet({ onClose, onCreated }) {
   const showToast = useBookingStore((s) => s.showToast)
+  const [saving, setSaving] = useState(false)
 
   const [name, setName] = useState('')
   const [minutes, setMinutes] = useState(45)
@@ -20,17 +22,29 @@ export function AddServiceSheet({ onClose }) {
 
   const isValid = name.trim().length > 0 && price.trim().length > 0 && Number(price) > 0
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!isValid) return
-    onClose()
-    showToast(`Услуга «${name}» добавлена 🎉`)
+    try {
+      setSaving(true)
+      await createService({
+        name: name.trim(),
+        duration_min: minutes,
+        price: Number(price),
+      })
+      onClose()
+      showToast(`Услуга «${name}» добавлена 🎉`)
+      onCreated?.() // Перезагружаем список услуг
+    } catch (err) {
+      showToast('Ошибка при создании услуги')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <SheetShell onClose={onClose}>
       <h2 className="mb-5 text-xl font-bold text-slate-900">Новая услуга</h2>
 
-      {/* Название */}
       <div>
         <label className="mb-2 block text-sm font-semibold text-slate-500">Название</label>
         <input
@@ -42,7 +56,6 @@ export function AddServiceSheet({ onClose }) {
         />
       </div>
 
-      {/* Длительность */}
       <div className="mt-4">
         <label className="mb-2 block text-sm font-semibold text-slate-500">Длительность</label>
         <div className="flex flex-wrap gap-2">
@@ -65,7 +78,6 @@ export function AddServiceSheet({ onClose }) {
         </div>
       </div>
 
-      {/* Стоимость */}
       <div className="mt-4">
         <label className="mb-2 block text-sm font-semibold text-slate-500">Стоимость</label>
         <div className="relative">
@@ -83,17 +95,16 @@ export function AddServiceSheet({ onClose }) {
         </div>
       </div>
 
-      {/* Кнопка сохранения */}
       <button
         onClick={handleSave}
-        disabled={!isValid}
+        disabled={!isValid || saving}
         className={`mt-6 w-full rounded-xl py-4 font-bold transition ${
-          isValid
+          isValid && !saving
             ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 active:scale-[0.98]'
             : 'bg-slate-200 text-slate-400'
         }`}
       >
-        Сохранить услугу
+        {saving ? 'Сохранение...' : 'Сохранить услугу'}
       </button>
     </SheetShell>
   )

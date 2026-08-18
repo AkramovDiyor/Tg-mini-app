@@ -4,28 +4,40 @@ import { ServiceCard } from '../components/ui/ServiceCard'
 import { ActiveBookingBar } from '../widgets/ActiveBookingBar'
 import { useBookingStore } from '../store/bookingStore'
 import { useDragScroll } from '../lib/useDragScroll'
-import { fetchServices } from '../services/api'
+import { fetchServices, fetchMasterProfile } from '../services/api'
 
-export function ServicesPage({ onPick, onOpenDetails }) {
+export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
   const pickService = useBookingStore((s) => s.pickService)
   const galleryRef = useDragScroll()
 
   const [services, setServices] = useState([])
+  const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchServices()
-      .then((data) => {
-        // Проверяем, что data существует и является массивом
-        setServices(Array.isArray(data) ? data : [])
-        setLoading(false)
-      })
-      .catch((err) => {
+    // Параллельно грузим услуги и профиль мастера
+    Promise.all([
+      fetchServices().catch((err) => {
         console.error('Failed to load services:', err)
-        setServices([]) // Устанавливаем пустой массив при ошибке
+        return []
+      }),
+      fetchMasterProfile().catch((err) => {
+        console.error('Failed to load profile:', err)
+        return null
+      }),
+    ])
+      .then(([servicesData, profileData]) => {
+        setServices(Array.isArray(servicesData) ? servicesData : [])
+        setProfile(profileData)
         setLoading(false)
       })
+      .catch(() => setLoading(false))
   }, [])
+
+  // Фолбэк-имя и bio, если API не вернул данные
+  const masterName = profile?.name || 'Мастер'
+  const masterBio = profile?.bio || 'Барбер'
+  const masterRating = profile?.rating || 4.8
 
   return (
     <div className="animate-fade-up">
@@ -40,10 +52,25 @@ export function ServicesPage({ onPick, onOpenDetails }) {
             </div>
             <span className="absolute bottom-1 right-1 h-4 w-4 rounded-full border-[3px] border-slate-900 bg-emerald-400" />
           </div>
-          <h1 className="mt-4 text-2xl font-bold text-white">Педро Барбер</h1>
+
+          {/* Имя мастера из API */}
+          <h1 className="mt-4 text-2xl font-bold text-white">
+            {masterName}
+          </h1>
+
+          {/* Рейтинг + специализация из API */}
           <span className="mt-2.5 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white backdrop-blur">
-            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-            4.9 · 6 лет опыта
+            {masterRating ? (
+              <>
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                {masterRating} · {masterBio}
+              </>
+            ) : (
+              <>
+                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+                {masterBio}
+              </>
+            )}
           </span>
         </div>
       </div>
@@ -79,7 +106,7 @@ export function ServicesPage({ onPick, onOpenDetails }) {
                   name: service.name,
                   price: service.price,
                   duration: service.duration_min,
-                  icon: User, // или другая иконка по вашему выбору
+                  icon: User,
                 }}
                 onClick={() => {
                   pickService({
@@ -97,7 +124,7 @@ export function ServicesPage({ onPick, onOpenDetails }) {
         </div>
       </div>
 
-      <ActiveBookingBar onOpenDetails={onOpenDetails} />
+      <ActiveBookingBar key={bookingsVersion} onOpenDetails={onOpenDetails} />
     </div>
   )
 }

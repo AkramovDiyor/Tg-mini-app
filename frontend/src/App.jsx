@@ -15,6 +15,7 @@ export default function App() {
   const [confirming, setConfirming] = useState(false)
   const [isDetailsOpen, setIsDetailsOpen] = useState(false)
   const [activeBookingForSheet, setActiveBookingForSheet] = useState(null)
+  const [bookingsVersion, setBookingsVersion] = useState(0) // ← НОВОЕ
 
   const bookSlotAction = useBookingStore((s) => s.bookSlot)
   const showToast = useBookingStore((s) => s.showToast)
@@ -36,6 +37,7 @@ export default function App() {
       bookSlotAction(key)
       setConfirming(false)
       setSheetSlot(null)
+      setBookingsVersion((v) => v + 1) // ← после новой записи обновляем список
       showToast('Запись подтверждена! За 2 часа до визита пришлём напоминание 🤝')
     } catch (err) {
       setConfirming(false)
@@ -54,6 +56,7 @@ export default function App() {
       await cancelBooking(bookingId)
       setIsDetailsOpen(false)
       setActiveBookingForSheet(null)
+      setBookingsVersion((v) => v + 1) // ← НОВОЕ: перезагружаем список
       showToast('Запись отменена. Время освобождено для других')
     } catch (err) {
       const message = err.response?.data?.message || err.message || 'Ошибка при отмене записи'
@@ -95,6 +98,7 @@ export default function App() {
               <ServicesPage
                 onPick={() => setScreen('booking')}
                 onOpenDetails={handleOpenDetails}
+                bookingsVersion={bookingsVersion} // ← передаём версию
               />
             ) : (
               <BookingPage

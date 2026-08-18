@@ -1,6 +1,7 @@
 import { MASTER_TABS } from '../../mock/masterData'
 
 export function MasterFloatingNav({ active, onChange }) {
+
   return (
     <div className="fixed bottom-4 left-1/2 z-30 w-[calc(100%-2.5rem)] max-w-[380px] -translate-x-1/2">
       <div className="flex items-center justify-around rounded-full border border-white/50 bg-white/80 px-4 py-2.5 shadow-lg backdrop-blur-xl">

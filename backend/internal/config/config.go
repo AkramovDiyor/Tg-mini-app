@@ -2,12 +2,12 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/joho/godotenv"
 )
 
-// Config содержит все переменные окружения для работы приложения
 type Config struct {
 	DBHost     string
 	DBPort     string
@@ -15,16 +15,12 @@ type Config struct {
 	DBPassword string
 	DBName     string
 	TgBotToken string
+	WebAppURL  string // 🔥 НОВОЕ
 }
 
-// Load загружает файл .env и собирает структуру Config
 func Load() (Config, error) {
-	// Пытаемся загрузить .env файл.
-	// Если его нет (например, в Docker-контейнере), godotenv вернет ошибку,
-	// но переменные могут быть в самой системе, поэтому ошибку логируем, но не падаем.
 	if err := godotenv.Load("../../.env"); err != nil {
-		// Если нужно жестко требовать .env, можно раскомментировать строку ниже:
-		// return Config{}, fmt.Errorf("ошибка загрузки .env файла: %w", err)
+		// .env может отсутствовать в контейнере
 	}
 
 	cfg := Config{
@@ -34,15 +30,20 @@ func Load() (Config, error) {
 		DBPassword: os.Getenv("DB_PASSWORD"),
 		DBName:     os.Getenv("DB_NAME"),
 		TgBotToken: os.Getenv("TG_BOT_TOKEN"),
+		WebAppURL:  os.Getenv("WEB_APP_URL"), // 🔥 НОВОЕ
 	}
 
-	// Минимальная валидация критических полей
 	if cfg.DBHost == "" || cfg.DBUser == "" || cfg.DBName == "" {
-		return Config{}, fmt.Errorf("пропущены обязательные настройки базы данных в окружении")
+		return Config{}, fmt.Errorf("пропущены обязательные настройки БД")
 	}
-	// if cfg.TgBotToken == "" {
-	// 	return Config{}, fmt.Errorf("пропущен токен Telegram-бота (TG_BOT_TOKEN)")
-	// }
+
+	if cfg.TgBotToken == "" {
+		return Config{}, fmt.Errorf("пропущен TG_BOT_TOKEN")
+	}
+
+	if cfg.WebAppURL == "" {
+		log.Println("⚠️  WEB_APP_URL не задан, Web App кнопка не будет работать")
+	}
 
 	return cfg, nil
 }

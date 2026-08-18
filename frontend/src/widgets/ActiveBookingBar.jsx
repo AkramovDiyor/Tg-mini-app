@@ -8,14 +8,23 @@ export function ActiveBookingBar({ onOpenDetails }) {
   const [loading, setLoading] = useState(true)
   const [now, setNow] = useState(() => new Date())
 
-  // Загрузка всех записей клиента
   useEffect(() => {
     loadBookings()
   }, [])
 
-  // Обновление таймера каждую минуту — пересчитываем "Через X ч Y мин"
+  // Обновляем таймер каждую минуту
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60000)
+    const t = setInterval(() => {
+      setNow(new Date())
+    }, 60000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Каждую минуту перезапрашиваем записи — чтобы убрать те, что прошли
+  useEffect(() => {
+    const t = setInterval(() => {
+      loadBookings()
+    }, 60000)
     return () => clearInterval(t)
   }, [])
 
@@ -24,14 +33,24 @@ export function ActiveBookingBar({ onOpenDetails }) {
       setLoading(true)
       const bookings = await fetchClientBookings()
 
-      // Берём только активные будущие записи, сортируем по времени возрастания,
-      // выбираем самую ближайшую
+      if (!Array.isArray(bookings)) {
+        setActiveBooking(null)
+        return
+      }
+
       const nowTime = new Date()
-      const upcoming = (Array.isArray(bookings) ? bookings : [])
-        .filter((b) => b.status === 'active' && new Date(b.start_time) > nowTime)
+
+      // СТРОГИЙ ФИЛЬТР: только будущие активные записи
+      const futureBookings = bookings
+        .filter((b) => {
+          // Исключаем отменённые
+          if (b.status === 'cancelled' || b.status === 'canceled') return false
+          // Только будущие
+          return new Date(b.start_time) > nowTime
+        })
         .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
 
-      setActiveBooking(upcoming[0] || null)
+      setActiveBooking(futureBookings[0] || null)
     } catch (err) {
       console.error('Failed to load bookings:', err)
       setActiveBooking(null)
@@ -40,7 +59,10 @@ export function ActiveBookingBar({ onOpenDetails }) {
     }
   }
 
-  if (loading || !activeBooking) return null
+  // Нет будущих записей — бар не показывается
+  if (loading || !activeBooking) {
+    return null
+  }
 
   const bookingDate = new Date(activeBooking.start_time)
   const timeLabel = getBookingTimeLabel(bookingDate, now)
@@ -59,7 +81,7 @@ export function ActiveBookingBar({ onOpenDetails }) {
             {timeLabel}
           </span>
           <span className="w-full truncate text-sm font-semibold">
-            {activeBooking.service_name}
+            {activeBooking.service_name || 'Услуга'}
           </span>
         </span>
         <ChevronRight className="h-5 w-5 shrink-0 text-slate-400" />

@@ -16,6 +16,7 @@ import {
 import { rub } from '../lib/currency'
 
 const QUICK_DAYS = buildQuickDays()
+const MASTER_TIME_ZONE = 'Europe/Moscow' // ← Часовой пояс мастера
 
 export function BookingPage({ onBack, onSlotClick }) {
   const service = useBookingStore((s) => s.service)
@@ -59,19 +60,39 @@ export function BookingPage({ onBack, onSlotClick }) {
     setView({ year: d.getFullYear(), month: d.getMonth() })
   }
 
-  const formattedSlots = slots.map((slot) => {
-    const time = new Date(slot.start_time)
-    const hours = String(time.getUTCHours()).padStart(2, '0')
-    const minutes = String(time.getUTCMinutes()).padStart(2, '0')
-    return {
-      start_time: slot.start_time,
-      time: `${hours}:${minutes}`,
-      status: slot.status === 'booked' ? 'busy' : slot.status,
-    }
-  })
+  const selectedDateObj = fromISO(selectedDate)
+  const isToday =
+    selectedDateObj.getFullYear() === TODAY.getFullYear() &&
+    selectedDateObj.getMonth() === TODAY.getMonth() &&
+    selectedDateObj.getDate() === TODAY.getDate()
 
-  const isDayOff = formattedSlots.length === 0
+  const now = new Date()
+
+
+  // ✅ Функция форматирования — парсит строку напрямую
+  const formatTimeInMasterTz = (isoString) => {
+    const timePart = isoString.split('T')[1]
+    const [hours, minutes] = timePart.split(':')
+    return `${hours}:${minutes}`
+  }
+  
+  const formattedSlots = slots
+    .map((slot) => {
+      const startTime = new Date(slot.start_time)
+      return {
+        start_time: slot.start_time,
+        startTime,
+        time: formatTimeInMasterTz(slot.start_time),
+        status: slot.status === 'booked' ? 'busy' : slot.status,
+      }
+    })
+    .filter((slot) => {
+      if (!isToday) return true
+      return slot.startTime > now
+    })
+  const isDayOff = slots.length === 0 && !loading
   const isFull = formattedSlots.length > 0 && formattedSlots.every((s) => s.status !== 'free')
+  const allPast = slots.length > 0 && formattedSlots.length === 0
 
   return (
     <div className="animate-fade-up pb-16">
@@ -148,6 +169,11 @@ export function BookingPage({ onBack, onSlotClick }) {
 
         {loading ? (
           <div className="py-8 text-center text-sm text-slate-400">Загрузка...</div>
+        ) : allPast ? (
+          <div className="animate-fade-in rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
+            <p className="text-lg font-bold text-slate-900">Все слоты на сегодня прошли</p>
+            <p className="mt-1.5 text-sm text-slate-400">Выберите другой день для записи</p>
+          </div>
         ) : isDayOff ? (
           <div className="animate-fade-in rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
             <p className="text-lg font-bold text-slate-900">Мастер не работает в этот день</p>

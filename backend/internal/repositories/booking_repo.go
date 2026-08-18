@@ -3,8 +3,8 @@ package repositories
 import (
 	"backend/internal/models"
 	"context"
+	"database/sql"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,24 +13,28 @@ import (
 
 // ClientBookingResponse описывает полный ответ для клиента
 type ClientBookingResponse struct {
-	BookingID      int64     `json:"booking_id"`
-	ClientName     string    `json:"client_name"`
-	ServiceName    string    `json:"service_name"`
-	ServicePrice   int       `json:"service_price"`
-	MasterName     string    `json:"master_name"`
-	MasterAddress  string    `json:"master_address"`
-	MasterInviteLink string  `json:"master_invite_link"`
-	StartTime      time.Time `json:"start_time"`
-	EndTime        time.Time `json:"end_time"`
-	Status         string    `json:"status"`
-	CreatedAt      time.Time `json:"created_at"`
+	BookingID        int64     `json:"booking_id"`
+	ClientName       string    `json:"client_name"`
+	ServiceName      string    `json:"service_name"`
+	ServicePrice     int       `json:"service_price"`
+	MasterName       string    `json:"master_name"`
+	MasterAddress    string    `json:"master_address"`
+	MasterInviteLink string    `json:"master_invite_link"`
+	StartTime        time.Time `json:"start_time"`
+	EndTime          time.Time `json:"end_time"`
+	Status           string    `json:"status"`
+	CreatedAt        time.Time `json:"created_at"`
 }
 
 type BookingRepository interface {
 	CreateBooking(ctx context.Context, tx pgx.Tx, booking models.Booking) error
 	GetBookingBySlotID(ctx context.Context, slotID int64) (models.Booking, error)
 	GetBookingsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Booking, error)
-	GetBookingsByClientTgID(ctx context.Context, tgID int64) ([]ClientBookingResponse, error) // НОВОЕ
+	GetBookingsByClientTgID(ctx context.Context, tgID int64) ([]ClientBookingResponse, error)
+	
+	// НОВЫЕ методы для отмены
+	GetBookingByID(ctx context.Context, tx pgx.Tx, bookingID int64) (models.Booking, error)
+	CancelBooking(ctx context.Context, tx pgx.Tx, bookingID int64) error
 }
 
 type BookingRepo struct {
@@ -42,15 +46,20 @@ func NewBookingRepo(db *pgxpool.Pool) *BookingRepo {
 }
 
 func (b *BookingRepo) CreateBooking(ctx context.Context, tx pgx.Tx, booking models.Booking) error {
-	query := `INSERT INTO bookings 
-        (slot_id, service_id, client_telegram_id, client_name, price_locked, status) 
-        VALUES ($1, $2, $3, $4, $5, $6)`
-	
-	_, err := tx.Exec(ctx, query, 
-		booking.SlotID, booking.ServiceID, booking.ClientTelegramID, 
-		booking.ClientName, booking.PriceLocked, booking.Status,
-	)
-	return err
+    query := `INSERT INTO bookings 
+        (slot_id, service_id, master_id, client_telegram_id, client_name, price_locked, status) 
+        VALUES ($1, $2, $3, $4, $5, $6, $7)`
+    
+    _, err := tx.Exec(ctx, query, 
+        booking.SlotID, 
+        booking.ServiceID, 
+        booking.MasterID,  // 🔥 ДОБАВЛЕНО
+        booking.ClientTelegramID, 
+        booking.ClientName, 
+        booking.PriceLocked, 
+        booking.Status,
+    )
+    return err
 }
 
 func (b *BookingRepo) GetBookingBySlotID(ctx context.Context, slotID int64) (models.Booking, error) {
@@ -63,38 +72,65 @@ func (b *BookingRepo) GetBookingBySlotID(ctx context.Context, slotID int64) (mod
 }
 
 func (b *BookingRepo) GetBookingsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Booking, error) {
-	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-	endOfDay := startOfDay.Add(24 * time.Hour)
+    startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+    endOfDay := startOfDay.Add(24 * time.Hour)
 
-	query := `
-		SELECT s.start_time, s.end_time, b.status
-		FROM bookings b
-		JOIN slots s ON b.slot_id = s.id
-		WHERE s.master_id = $1 AND s.start_time >= $2 AND s.start_time < $3
-		AND b.status NOT IN ('cancelled_by_client', 'cancelled_no_show')
-	`
-	rows, err := b.db.Query(ctx, query, masterID, startOfDay, endOfDay)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+    // 🔥 ИСПРАВЛЕНО: достаём ВСЕ поля из bookings
+    query := `
+        SELECT 
+            b.id,
+            b.slot_id,
+            b.service_id,
+            b.master_id,
+            b.client_telegram_id,
+            b.client_name,
+            b.price_locked,
+            b.status,
+            s.start_time,
+            s.end_time,
+            b.created_at,
+            b.updated_at
+        FROM bookings b
+        JOIN slots s ON b.slot_id = s.id
+        WHERE s.master_id = $1 
+          AND s.start_time >= $2 
+          AND s.start_time < $3
+          AND b.status NOT IN ('cancelled_by_client', 'cancelled_no_show')
+        ORDER BY s.start_time ASC
+    `
+    
+    rows, err := b.db.Query(ctx, query, masterID, startOfDay, endOfDay)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
 
-	var bookings []models.Booking
-	for rows.Next() {
-		var bk models.Booking
-		err := rows.Scan(&bk.StartTime, &bk.EndTime, &bk.Status)
-		if err != nil {
-			return nil, err
-		}
-		bookings = append(bookings, bk)
-	}
-	return bookings, nil
+    var bookings []models.Booking
+    for rows.Next() {
+        var bk models.Booking
+        err := rows.Scan(
+            &bk.ID,
+            &bk.SlotID,
+            &bk.ServiceID,
+            &bk.MasterID,
+            &bk.ClientTelegramID,
+            &bk.ClientName,
+            &bk.PriceLocked,
+            &bk.Status,
+            &bk.StartTime,
+            &bk.EndTime,
+            &bk.CreatedAt,
+            &bk.UpdatedAt,
+        )
+        if err != nil {
+            return nil, err
+        }
+        bookings = append(bookings, bk)
+    }
+    return bookings, nil
 }
 
-// НОВЫЙ МЕТОД: Достаем все активные записи клиента с полной информацией
 func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) ([]ClientBookingResponse, error) {
-	log.Printf("🔍 GetBookingsByClientTgID: ищем записи для tgID=%d", tgID)
-
 	query := `
 		SELECT 
 			b.id,
@@ -113,13 +149,13 @@ func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) (
 		LEFT JOIN services sv ON b.service_id = sv.id
 		LEFT JOIN masters m ON s.master_id = m.id
 		WHERE b.client_telegram_id = $1
-		ORDER BY s.start_time DESC
+		  AND b.status NOT IN ('cancelled_by_client', 'cancelled_no_show')
+		ORDER BY s.start_time ASC
 		LIMIT 50
 	`
 
 	rows, err := b.db.Query(ctx, query, tgID)
 	if err != nil {
-		log.Printf("❌ Database query error: %v", err)
 		return nil, fmt.Errorf("database query error: %w", err)
 	}
 	defer rows.Close()
@@ -129,31 +165,75 @@ func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) (
 	for rows.Next() {
 		var resp ClientBookingResponse
 		err := rows.Scan(
-			&resp.BookingID,
-			&resp.ClientName,
-			&resp.ServiceName,
-			&resp.ServicePrice,
-			&resp.MasterName,
-			&resp.MasterAddress,
-			&resp.MasterInviteLink,
-			&resp.StartTime,
-			&resp.EndTime,
-			&resp.Status,
-			&resp.CreatedAt,
+			&resp.BookingID, &resp.ClientName, &resp.ServiceName, &resp.ServicePrice,
+			&resp.MasterName, &resp.MasterAddress, &resp.MasterInviteLink,
+			&resp.StartTime, &resp.EndTime, &resp.Status, &resp.CreatedAt,
 		)
 		if err != nil {
-			log.Printf("❌ Scan error: %v", err)
 			return nil, fmt.Errorf("scan error on row: %w", err)
 		}
 		bookings = append(bookings, resp)
 	}
 
-	log.Printf("✅ Найдено записей: %d", len(bookings))
+	return bookings, nil
+}
 
-	if err = rows.Err(); err != nil {
-		log.Printf("❌ Rows iteration error: %v", err)
-		return nil, fmt.Errorf("rows iteration error: %w", err)
+// 🔥 НОВЫЙ: Получаем запись по ID с блокировкой строки (FOR UPDATE)
+
+
+func (b *BookingRepo) GetBookingByID(ctx context.Context, tx pgx.Tx, bookingID int64) (models.Booking, error) {
+	var booking models.Booking
+	var masterID sql.NullInt64  // 🔥 Nullable тип
+	
+	query := `
+		SELECT id, slot_id, service_id, master_id, client_telegram_id, client_name, status, created_at 
+		FROM bookings 
+		WHERE id = $1 
+		FOR UPDATE
+	`
+	
+	err := tx.QueryRow(ctx, query, bookingID).Scan(
+		&booking.ID,
+		&booking.SlotID,
+		&booking.ServiceID,
+		&masterID,  // 🔥 Сканируем в nullable тип
+		&booking.ClientTelegramID,
+		&booking.ClientName,
+		&booking.Status,
+		&booking.CreatedAt,
+	)
+	
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return models.Booking{}, fmt.Errorf("запись не найдена")
+		}
+		return models.Booking{}, err
+	}
+	
+	// Преобразуем в int64 (0 если NULL)
+	if masterID.Valid {
+		booking.MasterID = masterID.Int64
+	}
+	
+	return booking, nil
+}
+
+// 🔥 НОВЫЙ: Мягкое удаление — меняем статус вместо DELETE
+func (b *BookingRepo) CancelBooking(ctx context.Context, tx pgx.Tx, bookingID int64) error {
+	query := `
+		UPDATE bookings 
+		SET status = $1, updated_at = NOW() 
+		WHERE id = $2
+	`
+	result, err := tx.Exec(ctx, query, models.BookingStatusCancelledByClient, bookingID)
+	if err != nil {
+		return fmt.Errorf("failed to cancel booking: %w", err)
 	}
 
-	return bookings, nil
+	// Проверяем, что реально обновили строку
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("запись не найдена или уже отменена")
+	}
+
+	return nil
 }

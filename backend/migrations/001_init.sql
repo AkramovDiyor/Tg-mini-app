@@ -122,3 +122,27 @@ CROSS JOIN (VALUES (0), (1)) AS days(d)
 CROSS JOIN generate_series(10, 18) AS hour(h) 
 WHERE m.invite_link = 'LINK1'
 ON CONFLICT DO NOTHING;
+
+
+
+
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS master_id INTEGER REFERENCES masters(id);
+ALTER TABLE bookings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+
+
+-- Добавляем недостающие поля
+ALTER TABLE waitlist 
+ADD COLUMN IF NOT EXISTS client_name VARCHAR(255),
+ADD COLUMN IF NOT EXISTS client_phone VARCHAR(50),
+ADD COLUMN IF NOT EXISTS service_name VARCHAR(255),
+ADD COLUMN IF NOT EXISTS desired_time TIME;
+
+-- Заполнить master_id у всех существующих записей
+UPDATE bookings b
+SET master_id = s.master_id
+FROM slots s
+WHERE b.slot_id = s.id 
+  AND b.master_id IS NULL;
+
+-- Проверить результат
+SELECT id, master_id, status FROM bookings WHERE master_id IS NULL;

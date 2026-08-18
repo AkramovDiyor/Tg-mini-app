@@ -14,7 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-func GetClientIDFromContext(ctx context.Context) (int64, error) {
+func GetIDFromContext(ctx context.Context) (int64, error) {
     tgID, ok := ctx.Value(TgIDKey).(int64)
     if !ok {
         return 0, fmt.Errorf("telegram ID not found in context")
@@ -113,7 +113,7 @@ type BookRequest struct {
 }
 
 func (h *BookingHandler) BookSlot(w http.ResponseWriter, r *http.Request) {
-    tgID, err := GetClientIDFromContext(r.Context())
+    tgID, err := GetIDFromContext(r.Context())
     if err != nil {
         http.Error(w, err.Error(), http.StatusUnauthorized)
         return
@@ -168,7 +168,7 @@ func (h *BookingHandler) GetInfoMaster(w http.ResponseWriter, r *http.Request) (
 
 func (h *BookingHandler) GetClientBookings(w http.ResponseWriter, r *http.Request) {
 	// 1. Достаем Telegram ID из контекста
-	tgID, err := GetClientIDFromContext(r.Context())
+	tgID, err := GetIDFromContext(r.Context())
 	if err != nil {
 		http.Error(w, "Unauthorized: missing client id", http.StatusUnauthorized)
 		return
@@ -185,4 +185,48 @@ func (h *BookingHandler) GetClientBookings(w http.ResponseWriter, r *http.Reques
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(bookings)
+}
+
+
+
+func (h *BookingHandler) CancelBooking(w http.ResponseWriter, r *http.Request) {
+	// 1. Получаем Telegram ID клиента из контекста
+	tgID, err := GetIDFromContext(r.Context())
+	if err != nil {
+		http.Error(w, "Unauthorized: missing client id", http.StatusUnauthorized)
+		return
+	}
+
+	// 2. Получаем booking_id из URL: /client/bookings/123/cancel
+	bookingIDStr := chi.URLParam(r, "booking_id")
+	bookingID, err := strconv.ParseInt(bookingIDStr, 10, 64)
+	if err != nil || bookingID <= 0 {
+		http.Error(w, "bad request: invalid booking_id", http.StatusBadRequest)
+		return
+	}
+
+	// 3. Вызываем сервис отмены
+	err = h.bookingServ.CancelBooking(r.Context(), bookingID, tgID)
+	if err != nil {
+		// Разные типы ошибок — разные HTTP-коды
+		switch err.Error() {
+		case "запись не найдена":
+			http.Error(w, err.Error(), http.StatusNotFound)
+		case "вы не можете отменить чужую запись":
+			http.Error(w, err.Error(), http.StatusForbidden)
+		case "запись уже отменена", "нельзя отменить завершенную запись", "нельзя отменить запись, которая уже началась":
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+		default:
+			http.Error(w, fmt.Sprintf("failed to cancel booking: %v", err), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	// 4. Успешный ответ
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "success",
+		"message": "запись успешно отменена",
+	})
 }
