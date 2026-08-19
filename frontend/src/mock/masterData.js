@@ -1,4 +1,4 @@
-import { CalendarDays, Users, User } from 'lucide-react'
+import { CalendarDays, Users, Store, User } from 'lucide-react'
 
 export const TODAY_APPOINTMENTS = [
   { time: '10:00', client: 'Алексей П.', service: 'Мужская стрижка',  price: 1500, status: 'confirmed' },
@@ -23,10 +23,12 @@ export const AVATAR_GRADIENTS = [
   'from-emerald-400 to-teal-600',
 ]
 
+// 4 вкладки вместо 3
 export const MASTER_TABS = [
   { id: 'today',   icon: CalendarDays },
   { id: 'queue',   icon: Users        },
-  { id: 'profile', icon: User         }, // ← было settings
+  { id: 'studio',  icon: Store        }, // ← НОВАЯ
+  { id: 'profile', icon: User         },
 ]
 
 export const WEEK_TAGS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']

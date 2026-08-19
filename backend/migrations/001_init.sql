@@ -146,3 +146,19 @@ WHERE b.slot_id = s.id
 
 -- Проверить результат
 SELECT id, master_id, status FROM bookings WHERE master_id IS NULL;
+
+
+-- Добавляем колонку is_deleted
+ALTER TABLE services 
+ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN DEFAULT FALSE;
+
+-- Устанавливаем значение FALSE для всех существующих записей
+UPDATE services SET is_deleted = FALSE WHERE is_deleted IS NULL;
+
+
+CREATE TABLE IF NOT EXISTS master_photos (
+    id BIGSERIAL PRIMARY KEY,
+    master_id BIGINT NOT NULL REFERENCES masters(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);

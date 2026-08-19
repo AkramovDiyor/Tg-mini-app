@@ -101,3 +101,65 @@ export function getBookingTimeLabel(target, now = new Date()) {
   const m = Math.floor((diff % HOUR) / 60000)
   return h > 0 ? `Через ${h} ч ${m} мин` : `Через ${m} мин`
 }
+
+
+
+// export function formatTimeFromISO(isoString) {
+//   if (!isoString) return ''
+  
+//   // UTC формат: "2026-08-28T18:00:00Z"
+//   if (isoString.endsWith('Z')) {
+//     const timePart = isoString.split('T')[1]
+//     const [hours, minutes] = timePart.split(':')
+//     return `${hours}:${minutes}`
+//   }
+  
+//   // Формат с таймзоной: "2026-08-28T21:00:00+03:00"
+//   // Конвертируем в UTC чтобы получить оригинальное время
+//   const date = new Date(isoString)
+//   const hours = String(date.getUTCHours()).padStart(2, '0')
+//   const minutes = String(date.getUTCMinutes()).padStart(2, '0')
+//   return `${hours}:${minutes}`
+// }
+
+
+// Правильная функция форматирования времени (Локальное время)
+export function formatTimeFromISO(isoString) {
+  if (!isoString) return ''
+  const date = new Date(isoString)
+  // Используем getHours(), а не getUTCHours()!
+  const hours = String(date.getHours()).padStart(2, '0')
+  const minutes = String(date.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
+
+// Правильная функция таймера
+export function getBookingTimeLabelFromISO(isoString, now = new Date()) {
+  if (!isoString) return ''
+  
+  // new Date(isoString) уже дает нам локальный timestamp
+  const targetTime = new Date(isoString).getTime()
+  const nowTime = now.getTime()
+  const diff = targetTime - nowTime
+  
+  if (diff <= 0) return 'Запись прошла'
+  
+  const HOUR = 3600000
+  const timeStr = formatTimeFromISO(isoString)
+  
+  // Больше 24 часов: "Запись 20 авг, 11:00"
+  if (diff > 24 * HOUR) {
+    const targetDate = new Date(isoString)
+    return `Запись ${targetDate.getDate()} ${MONTHS_SHORT[targetDate.getMonth()]}, ${timeStr}`
+  }
+  
+  // 3-24 часа: "Сегодня, 11:00"
+  if (diff > 3 * HOUR) {
+    return `Сегодня, ${timeStr}`
+  }
+  
+  // Меньше 3 часов: обратный отсчёт
+  const h = Math.floor(diff / HOUR)
+  const m = Math.floor((diff % HOUR) / 60000)
+  return h > 0 ? `Через ${h} ч ${m} мин` : `Через ${m} мин`
+}

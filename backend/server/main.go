@@ -16,68 +16,103 @@ import (
 )
 
 func main() {
-    // 1. Загружаем конфигурацию
+    // 1. Устанавливаем часовой пояс Москвы глобально
+    moscow, err := time.LoadLocation("Europe/Moscow")
+    if err != nil {
+        log.Fatalf("❌ Не удалось загрузить часовой пояс Москвы: %v", err)
+    }
+    time.Local = moscow
+    log.Println("🕐 Часовой пояс установлен: Europe/Moscow")
+
+    // 2. Загружаем конфигурацию
     cfg, err := config.Load()
     if err != nil {
         log.Fatalf("❌ Ошибка конфигурации: %v", err)
     }
 
-    // 2. Подключаемся к базе данных
+    // 3. Подключаемся к базе данных
     pool, err := database.NewPostgres(cfg)
     if err != nil {
         log.Fatalf("❌ Ошибка подключения к БД: %v", err)
     }
     defer pool.Close()
 
-    // 3. Инициализируем репозитории
+    // 4. Инициализируем репозитории
     masterRepo := repositories.NewMasterRepo(pool)
     serviceRepo := repositories.NewServiceRepo(pool)
     slotRepo := repositories.NewSlotRepo(pool)
     bookingRepo := repositories.NewBookingRepo(pool)
-	waitlistRepo := repositories.NewWaitlistRepo(pool)
+    waitlistRepo := repositories.NewWaitlistRepo(pool)
     clientRepo := repositories.NewClientRepo(pool)
+    photoRepo := repositories.NewPhotoRepo(pool)
 
-    // 4. Инициализируем сервисы
+    // 5. Инициализируем сервисы
+    masterService := service.NewMasterService(masterRepo)
     bookingService := service.NewBookingService(pool, slotRepo, bookingRepo, serviceRepo, clientRepo)
     slotService := service.NewSlotService(masterRepo, serviceRepo, bookingRepo)
 
-    // 5. Инициализируем HTTP-хендлеры
+    // ============================================
+    // 🌱 ПОСЕВ ТЕСТОВЫХ ДАННЫХ (SEED)
+    // ============================================
+        // ============================================
+    // 🌱 ПОСЕВ ТЕСТОВЫХ ДАННЫХ (SEED)
+    // ============================================
+    ctxSeed := context.Background()
+
+    // Создаем мастера (ID: 999999 для AuthMiddleware)
+    master, err := masterService.RegisterMaster(ctxSeed, 999999, "Педро Барбер")
+    if err != nil {
+        log.Printf("⚠️ Ошибка при посеве мастера (возможно уже существует): %v", err)
+        master, _ = masterRepo.GetMasterByTelegramID(ctxSeed, 999999) // Достаем, если уже есть
+    }
+
+    // Создаем клиента (ID: 777111222 для AuthMiddleware)
+    _, err = clientRepo.GetOrCreateClient(ctxSeed, 777111222, "vasya_test", "Вася Тестовый")
+    if err != nil {
+        log.Printf("⚠️ Ошибка при посеве клиента: %v", err)
+    }
+
+    log.Println("----------------------------------------")
+    log.Println("🌱 ТЕСТОВЫЕ ДАННЫЕ ГОТОВЫ!")
+    log.Printf("🛠 Панель мастера: http://localhost:5173?startapp=master")
+    log.Printf("✂️ Клиентская часть: http://localhost:5173?startapp=%s", master.InviteLink)
+    log.Println("----------------------------------------")
+
+    // 6. Инициализируем HTTP-хендлеры
     bookingHandler := httpapi.NewBookingHandler(
-        masterRepo, serviceRepo, slotRepo, bookingRepo, bookingService, slotService,
+        masterRepo, serviceRepo, slotRepo, bookingRepo, photoRepo, bookingService, slotService,
     )
 
-	masterHandler := httpapi.NewMasterHandler(masterRepo, serviceRepo, bookingRepo, waitlistRepo)
+    masterHandler := httpapi.NewMasterHandler(masterRepo, serviceRepo, bookingRepo, waitlistRepo)
+    photoHandler := httpapi.NewPhotoHandler(photoRepo, masterRepo)
 
-    // 6. Создаем HTTP-роутер
-    router := httpapi.NewRouter(bookingHandler, masterHandler, cfg.TgBotToken)
+    // 7. Создаем HTTP-роутер
+    router := httpapi.NewRouter(bookingHandler, masterHandler, photoHandler, cfg.TgBotToken)
 
     // ============================================
-    // 7. ЗАПУСК HTTP-СЕРВЕРА
+    // 8. ЗАПУСК HTTP-СЕРВЕРА
     // ============================================
     httpServer := &http.Server{
         Addr:    ":8080",
         Handler: router,
     }
 
-    // Запускаем HTTP-сервер в горутине
     go func() {
         log.Println("🚀 HTTP-сервер запущен на порту 8080")
         if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
             log.Fatalf("❌ Ошибка HTTP-сервера: %v", err)
         }
-	}()
+    }()
 
     // ============================================
-    // 8. GRACEFUL SHUTDOWN (Корректное завершение)
+    // 9. GRACEFUL SHUTDOWN
     // ============================================
     quit := make(chan os.Signal, 1)
     signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
     
-    // Блокируемся до получения сигнала завершения
     <-quit
     log.Println("🛑 Получен сигнал завершения. Останавливаем сервер...")
 
-    // Даем серверу 10 секунд на завершение текущих запросов
     ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
     defer cancel()
 

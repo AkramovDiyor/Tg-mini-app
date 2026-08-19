@@ -10,6 +10,7 @@ type Service struct {
 	DurationMin int       `json:"duration_min"` // Длительность в минутах (например, 45)
 	Price       int       `json:"price"`        // Цена в целых числах (например, 1500)
 	Description string    `json:"description"`  // Опциональное описание услуги
+	IsDeleted   bool      `json:"is_deleted"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }

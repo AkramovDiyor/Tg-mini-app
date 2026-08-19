@@ -16,6 +16,7 @@ type ClientBookingResponse struct {
 	BookingID        int64     `json:"booking_id"`
 	ClientName       string    `json:"client_name"`
 	ServiceName      string    `json:"service_name"`
+	ServiceDuration   int       `json:"service_duration"`
 	ServicePrice     int       `json:"service_price"`
 	MasterName       string    `json:"master_name"`
 	MasterAddress    string    `json:"master_address"`
@@ -136,6 +137,7 @@ func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) (
 			b.id,
 			b.client_name,
 			COALESCE(sv.name, 'Без названия') AS service_name,
+			COALESCE(sv.duration_min, 0) AS service_duration,
 			COALESCE(sv.price, 0) AS service_price,
 			COALESCE(m.name, 'Без имени') AS master_name,
 			COALESCE(m.address, 'Без адреса') AS master_address,
@@ -165,9 +167,18 @@ func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) (
 	for rows.Next() {
 		var resp ClientBookingResponse
 		err := rows.Scan(
-			&resp.BookingID, &resp.ClientName, &resp.ServiceName, &resp.ServicePrice,
-			&resp.MasterName, &resp.MasterAddress, &resp.MasterInviteLink,
-			&resp.StartTime, &resp.EndTime, &resp.Status, &resp.CreatedAt,
+			&resp.BookingID, 
+			&resp.ClientName, 
+			&resp.ServiceName,
+			&resp.ServiceDuration,  // 🔥 НОВОЕ
+			&resp.ServicePrice,
+			&resp.MasterName, 
+			&resp.MasterAddress, 
+			&resp.MasterInviteLink,
+			&resp.StartTime, 
+			&resp.EndTime, 
+			&resp.Status, 
+			&resp.CreatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("scan error on row: %w", err)

@@ -4,7 +4,7 @@ import { ServiceCard } from '../components/ui/ServiceCard'
 import { ActiveBookingBar } from '../widgets/ActiveBookingBar'
 import { useBookingStore } from '../store/bookingStore'
 import { useDragScroll } from '../lib/useDragScroll'
-import { fetchServices, fetchMasterProfile } from '../services/api'
+import { fetchServices, fetchMasterInfo, normalizePhotoUrl } from '../services/api'
 
 export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
   const pickService = useBookingStore((s) => s.pickService)
@@ -15,14 +15,14 @@ export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Параллельно грузим услуги и профиль мастера
+    // Параллельно грузим услуги и публичную информацию о мастере
     Promise.all([
       fetchServices().catch((err) => {
         console.error('Failed to load services:', err)
         return []
       }),
-      fetchMasterProfile().catch((err) => {
-        console.error('Failed to load profile:', err)
+      fetchMasterInfo().catch((err) => {
+        console.error('Failed to load master info:', err)
         return null
       }),
     ])
@@ -37,7 +37,10 @@ export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
   // Фолбэк-имя и bio, если API не вернул данные
   const masterName = profile?.name || 'Мастер'
   const masterBio = profile?.bio || 'Барбер'
-  const masterRating = profile?.rating || 4.8
+  const masterRating = profile?.rating || null
+
+  // Фото работ из API
+  const photos = profile?.photos || []
 
   return (
     <div className="animate-fade-up">
@@ -83,14 +86,27 @@ export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
           ref={galleryRef}
           className="thin-scrollbar mt-3 flex cursor-grab snap-x snap-mandatory select-none gap-3 scroll-pl-5 overflow-x-auto px-5 pb-2 active:cursor-grabbing"
         >
-          {[1, 2, 3, 4].map((n) => (
-            <div
-              key={n}
-              className="flex h-32 w-40 shrink-0 snap-start items-center justify-center rounded-2xl bg-gradient-to-br from-slate-200 to-slate-300"
-            >
+          {photos.length === 0 ? (
+            // Заглушка, если у мастера пока нет фото
+            <div className="flex h-32 w-40 shrink-0 snap-start flex-col items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-slate-200 to-slate-300">
               <Image className="h-8 w-8 text-slate-400/70" strokeWidth={1.5} />
+              <span className="text-[11px] font-medium text-slate-400">Фото скоро появятся</span>
             </div>
-          ))}
+          ) : (
+            photos.map((photo) => (
+              <div
+                key={photo.id}
+                className="h-32 w-40 shrink-0 snap-start overflow-hidden rounded-2xl bg-slate-200"
+              >
+                <img
+                  src={normalizePhotoUrl(photo.url)}
+                  alt="Работа мастера"
+                  className="h-full w-full object-cover"
+                  draggable={false}
+                />
+              </div>
+            ))
+          )}
         </div>
 
         <h2 className="mt-6 px-5 text-lg font-bold text-slate-900">Услуги</h2>

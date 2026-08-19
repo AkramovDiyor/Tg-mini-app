@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Scissors, ChevronRight } from 'lucide-react'
-import { getBookingTimeLabel } from '../lib/dates'
+import { getBookingTimeLabel, formatTimeFromISO } from '../lib/dates'
 import { fetchClientBookings } from '../services/api'
 
 export function ActiveBookingBar({ onOpenDetails }) {
@@ -12,19 +12,13 @@ export function ActiveBookingBar({ onOpenDetails }) {
     loadBookings()
   }, [])
 
-  // Обновляем таймер каждую минуту
   useEffect(() => {
-    const t = setInterval(() => {
-      setNow(new Date())
-    }, 60000)
+    const t = setInterval(() => setNow(new Date()), 60000)
     return () => clearInterval(t)
   }, [])
 
-  // Каждую минуту перезапрашиваем записи — чтобы убрать те, что прошли
   useEffect(() => {
-    const t = setInterval(() => {
-      loadBookings()
-    }, 60000)
+    const t = setInterval(() => loadBookings(), 60000)
     return () => clearInterval(t)
   }, [])
 
@@ -39,13 +33,11 @@ export function ActiveBookingBar({ onOpenDetails }) {
       }
 
       const nowTime = new Date()
+      const CANCEL_STATUSES = ['cancelled', 'canceled', 'rejected', 'declined']
 
-      // СТРОГИЙ ФИЛЬТР: только будущие активные записи
       const futureBookings = bookings
         .filter((b) => {
-          // Исключаем отменённые
-          if (b.status === 'cancelled' || b.status === 'canceled') return false
-          // Только будущие
+          if (CANCEL_STATUSES.includes(b.status?.toLowerCase())) return false
           return new Date(b.start_time) > nowTime
         })
         .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
@@ -59,13 +51,12 @@ export function ActiveBookingBar({ onOpenDetails }) {
     }
   }
 
-  // Нет будущих записей — бар не показывается
   if (loading || !activeBooking) {
     return null
   }
 
-  const bookingDate = new Date(activeBooking.start_time)
-  const timeLabel = getBookingTimeLabel(bookingDate, now)
+  // ✅ Извлекаем время напрямую из строки
+  const timeStr = formatTimeFromISO(activeBooking.start_time)
 
   return (
     <button
@@ -78,7 +69,7 @@ export function ActiveBookingBar({ onOpenDetails }) {
         </span>
         <span className="mx-3 flex min-w-0 flex-1 flex-col items-start text-left">
           <span className="text-xs font-bold text-emerald-400">
-            {timeLabel}
+            {timeStr}
           </span>
           <span className="w-full truncate text-sm font-semibold">
             {activeBooking.service_name || 'Услуга'}

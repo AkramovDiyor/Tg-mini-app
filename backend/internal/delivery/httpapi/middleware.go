@@ -47,7 +47,9 @@ func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
             // ВРЕМЕННО ДЛЯ ПОСТМАНА:
             var tgID int64
             if initData == "test-vasya" {
-                tgID = 111222333
+                tgID = 777111222 // ID клиента
+            } else if initData == "test-pedro" {
+                tgID = 999999 // ВСТАВЬ СЮДА РЕАЛЬНЫЙ ID ИЗ БАЗЫ!
             } else {
                 http.Error(w, "Unauthorized", http.StatusUnauthorized)
                 return
