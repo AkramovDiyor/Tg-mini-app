@@ -24,10 +24,10 @@ function getInitData() {
   // ВРЕМЕННО ДЛЯ ТЕСТА В БРАУЗЕРЕ:
   // Подставляем тестовые заглушки в зависимости от того, по какой ссылке мы открыли
   const startParam = getStartParam()
-  if (startParam === 'master') {
-    return 'test-pedro'
-  }
-  return 'test-vasya'
+  // if (startParam === 'master') {
+  //   return 'test-pedro'
+  // }
+  return 'test-pedro'
 }
 
 // ============================================
