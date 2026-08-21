@@ -2,20 +2,24 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
 )
 
+// type Config struct {
+// 	DBHost     string
+// 	DBPort     string
+// 	DBUser     string
+// 	DBPassword string
+// 	DBName     string
+// 	TgBotToken string
+// 	WebAppURL  string // 🔥 НОВОЕ
+// }
+
 type Config struct {
-	DBHost     string
-	DBPort     string
-	DBUser     string
-	DBPassword string
-	DBName     string
-	TgBotToken string
-	WebAppURL  string // 🔥 НОВОЕ
+	DatabaseURL string
+	TgBotToken  string
 }
 
 func Load() (Config, error) {
@@ -24,26 +28,23 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		DBHost:     os.Getenv("DB_HOST"),
-		DBPort:     os.Getenv("DB_PORT"),
-		DBUser:     os.Getenv("DB_USER"),
-		DBPassword: os.Getenv("DB_PASSWORD"),
-		DBName:     os.Getenv("DB_NAME"),
-		TgBotToken: os.Getenv("TG_BOT_TOKEN"),
-		WebAppURL:  os.Getenv("WEB_APP_URL"), // 🔥 НОВОЕ
+		// DBHost:     os.Getenv("DB_HOST"),
+		// DBPort:     os.Getenv("DB_PORT"),
+		// DBUser:     os.Getenv("DB_USER"),
+		// DBPassword: os.Getenv("DB_PASSWORD"),
+		// DBName:     os.Getenv("DB_NAME"),
+		DatabaseURL: os.Getenv("DATABASE_URL"),
+		TgBotToken:  os.Getenv("TG_BOT_TOKEN"),
+		// WebAppURL:  os.Getenv("WEB_APP_URL"), // 🔥 НОВОЕ
 	}
 
-	if cfg.DBHost == "" || cfg.DBUser == "" || cfg.DBName == "" {
-		return Config{}, fmt.Errorf("пропущены обязательные настройки БД")
+	if cfg.DatabaseURL == "" {
+		return Config{}, fmt.Errorf("пропущены обязательные настройки БД (DATABASE_URL)")
 	}
 
-	if cfg.TgBotToken == "" {
-		return Config{}, fmt.Errorf("пропущен TG_BOT_TOKEN")
-	}
-
-	if cfg.WebAppURL == "" {
-		log.Println("⚠️  WEB_APP_URL не задан, Web App кнопка не будет работать")
-	}
+	// if cfg.TgBotToken == "" {
+	// 	return Config{}, fmt.Errorf("пропущен TG_BOT_TOKEN")
+	// }
 
 	return cfg, nil
 }
