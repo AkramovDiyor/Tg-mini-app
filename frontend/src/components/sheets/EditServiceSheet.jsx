@@ -1,70 +1,48 @@
 import { useState } from 'react'
 import { SheetShell } from './SheetShell'
-import { useBookingStore } from '../../store/bookingStore'
-import { updateService, deleteService } from '../../services/api'
+import { useUpdateServiceMutation, useDeleteServiceMutation } from '../../hooks/useMasterMutations'
 
 const DURATION_OPTIONS = [
   { label: '15 мин', minutes: 15 },
   { label: '30 мин', minutes: 30 },
   { label: '45 мин', minutes: 45 },
-  { label: '1 ч',    minutes: 60 },
-  { label: '1.5 ч',  minutes: 90 },
-  { label: '2 ч',    minutes: 120 },
+  { label: '1 ч', minutes: 60 },
+  { label: '1.5 ч', minutes: 90 },
+  { label: '2 ч', minutes: 120 },
 ]
 
-export function EditServiceSheet({ service, onClose, onSaved }) {
-  const showToast = useBookingStore((s) => s.showToast)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-
+export function EditServiceSheet({ service, onClose }) {
+  const updateMutation = useUpdateServiceMutation()
+  const deleteMutation = useDeleteServiceMutation()
   const [name, setName] = useState(service?.name || '')
   const [minutes, setMinutes] = useState(service?.duration_min || 45)
   const [price, setPrice] = useState(service?.price != null ? String(service.price) : '')
 
   const isValid = name.trim().length > 0 && price.trim().length > 0 && Number(price) > 0
+  const isBusy = updateMutation.isPending || deleteMutation.isPending
 
-  const handleSave = async () => {
-    if (!isValid || saving || deleting) return
-    try {
-      setSaving(true)
-      await updateService(service.id, {
-        name: name.trim(),
-        duration_min: minutes,
-        price: Number(price),
-      })
-      showToast(`Услуга «${name}» обновлена ✏️`)
-      onSaved?.()  // ← СНАЧАЛА обновляем данные
-      onClose()    // ← ПОТОМ закрываем шит
-    } catch (err) {
-      const message = err.response?.data?.message || err.message || 'Ошибка при обновлении'
-      showToast(message)
-    } finally {
-      setSaving(false)
-    }
-  }
-  
-  const handleDelete = async () => {
-    if (saving || deleting) return
-    try {
-      setDeleting(true)
-      await deleteService(service.id)
-      showToast(`Услуга «${service.name}» удалена 🗑`)
-      onSaved?.()  // ← СНАЧАЛА обновляем данные
-      onClose()    // ← ПОТОМ закрываем шит
-    } catch (err) {
-      const message = err.response?.data?.message || err.message || 'Ошибка при удалении'
-      showToast(message)
-    } finally {
-      setDeleting(false)
-    }
+  const handleSave = () => {
+    if (!isValid || isBusy) return
+    updateMutation.mutate(
+      {
+        serviceId: service.id,
+        payload: { name: name.trim(), duration_min: minutes, price: Number(price) },
+      },
+      { onSuccess: () => onClose() },
+    )
   }
 
-  const isBusy = saving || deleting
+  const handleDelete = () => {
+    if (isBusy) return
+    deleteMutation.mutate(
+      { serviceId: service.id, name: service.name },
+      { onSuccess: () => onClose() },
+    )
+  }
 
   return (
     <SheetShell onClose={isBusy ? () => {} : onClose} closableOnBackdrop={!isBusy}>
       <h2 className="mb-5 text-xl font-bold text-slate-900">Редактировать услугу</h2>
-
       <div>
         <label className="mb-2 block text-sm font-semibold text-slate-500">Название</label>
         <input
@@ -76,7 +54,6 @@ export function EditServiceSheet({ service, onClose, onSaved }) {
           className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3.5 text-base font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
         />
       </div>
-
       <div className="mt-4">
         <label className="mb-2 block text-sm font-semibold text-slate-500">Длительность</label>
         <div className="flex flex-wrap gap-2">
@@ -85,6 +62,7 @@ export function EditServiceSheet({ service, onClose, onSaved }) {
             return (
               <button
                 key={opt.minutes}
+                type="button"
                 onClick={() => setMinutes(opt.minutes)}
                 disabled={isBusy}
                 className={`rounded-xl px-4 py-2 text-sm transition ${
@@ -99,7 +77,6 @@ export function EditServiceSheet({ service, onClose, onSaved }) {
           })}
         </div>
       </div>
-
       <div className="mt-4">
         <label className="mb-2 block text-sm font-semibold text-slate-500">Стоимость</label>
         <div className="relative">
@@ -117,8 +94,8 @@ export function EditServiceSheet({ service, onClose, onSaved }) {
           </span>
         </div>
       </div>
-
       <button
+        type="button"
         onClick={handleSave}
         disabled={!isValid || isBusy}
         className={`mt-6 w-full rounded-xl py-4 font-bold transition ${
@@ -127,15 +104,15 @@ export function EditServiceSheet({ service, onClose, onSaved }) {
             : 'bg-slate-200 text-slate-400'
         }`}
       >
-        {saving ? 'Сохранение...' : 'Сохранить'}
+        {updateMutation.isPending ? 'Сохранение...' : 'Сохранить'}
       </button>
-
       <button
+        type="button"
         onClick={handleDelete}
         disabled={isBusy}
         className="mt-2 w-full py-4 font-bold text-red-500 transition active:scale-[0.98] disabled:opacity-50"
       >
-        {deleting ? 'Удаление...' : 'Удалить услугу'}
+        {deleteMutation.isPending ? 'Удаление...' : 'Удалить услугу'}
       </button>
     </SheetShell>
   )

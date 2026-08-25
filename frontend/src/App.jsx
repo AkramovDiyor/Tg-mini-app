@@ -1,235 +1,153 @@
-import React, { useState, useEffect } from 'react'
-import { useBookingStore } from './store/bookingStore'
-import { ConfirmBookingSheet } from './components/sheets/ConfirmBookingSheet'
+import { lazy, Suspense } from 'react'
+import { AppFrame } from './components/AppFrame'
 import { BookingDetailsSheet } from './components/sheets/BookingDetailsSheet'
+import { ConfirmBookingSheet } from './components/sheets/ConfirmBookingSheet'
+import { IdentitySkeleton, PageFallbackSkeleton } from './components/skeletons/Skeletons'
 import { Toast } from './components/ui/Toast'
-import { bookSlot, cancelBooking, fetchUserIdentity } from './services/api'
-import { ServicesPage } from './page/ServicesPage'
-import { BookingPage } from './page/BookingPage'
-import { MasterPage } from './page/MasterPage'
+import { useBookSlotMutation, useCancelBookingMutation } from './hooks/useBookingMutations'
+import { useMeQuery } from './hooks/useMeQuery'
+import { getClientDisplayName } from './lib/telegram'
+import { useBookingStore } from './store/bookingStore'
+
+// 🔥 OPTIMIZED: мастер и клиент не тянут бандлы друг друга
+const ServicesPage = lazy(() =>
+  import('./page/ServicesPage').then((m) => ({ default: m.ServicesPage })),
+)
+const BookingPage = lazy(() =>
+  import('./page/BookingPage').then((m) => ({ default: m.BookingPage })),
+)
+const MasterPage = lazy(() =>
+  import('./page/MasterPage').then((m) => ({ default: m.MasterPage })),
+)
 
 export default function App() {
-  const [role, setRole] = useState(null)
-  const [identity, setIdentity] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [screen, setScreen] = useState('services')
-  const [sheetSlot, setSheetSlot] = useState(null)
-  const [confirming, setConfirming] = useState(false)
-  const [isDetailsOpen, setIsDetailsOpen] = useState(false)
-  const [activeBookingForSheet, setActiveBookingForSheet] = useState(null)
-  const [bookingsVersion, setBookingsVersion] = useState(0)
+  const { data: identity, isPending, isError, error, refetch } = useMeQuery()
 
-  const bookSlotAction = useBookingStore((s) => s.bookSlot)
-  const showToast = useBookingStore((s) => s.showToast)
+  const screen = useBookingStore((s) => s.screen)
   const service = useBookingStore((s) => s.service)
+  const sheetSlot = useBookingStore((s) => s.sheetSlot)
+  const detailsBooking = useBookingStore((s) => s.detailsBooking)
+  const closeSlotSheet = useBookingStore((s) => s.closeSlotSheet)
+  const closeDetails = useBookingStore((s) => s.closeDetails)
 
-  // 🔥 Автоматическое определение роли через бэкенд (с умным fallback для браузера)
-    // 🔥 Автоматическое определение роли (с четким разделением тестов мастера и клиента)
-  useEffect(() => {
-    async function determineRole() {
-      try {
-        const urlParams = new URLSearchParams(window.location.search)
-        const mode = urlParams.get('mode')
-        const urlStartapp = urlParams.get('startapp')
+  const inviteLink =
+    identity?.invite_link ||
+    (typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('startapp')
+      : null)
 
-        // 1️⃣ ЯВНЫЙ ТЕСТ МАСТЕРА В БРАУЗЕРЕ
-        if (!window.Telegram?.WebApp?.initData && mode === 'master') {
-          console.log('🌐 Тест в браузере: режим МАСТЕРА')
-          setIdentity({ 
-            role: 'master', 
-            master: { telegram_id: 999999, name: 'Тестовый Мастер' } 
-          })
-          setRole('master')
-          setLoading(false)
-          return // 🛑 Прерываем, не спрашиваем бэкенд
-        }
+  const bookMutation = useBookSlotMutation({ inviteLink: inviteLink || '' })
+  const cancelMutation = useCancelBookingMutation()
 
-        // 2️⃣ ЯВНЫЙ ТЕСТ КЛИЕНТА В БРАУЗЕРЕ (есть startapp, но это НЕ 'master')
-        if (!window.Telegram?.WebApp?.initData && urlStartapp && urlStartapp !== 'master') {
-          console.log('🌐 Тест в браузере: режим КЛИЕНТА, link:', urlStartapp)
-          setIdentity({ 
-            role: 'client', 
-            invite_link: urlStartapp,
-            user: { telegram_id: 777111222 }
-          })
-          setRole('client')
-          setLoading(false)
-          return // 🛑 Прерываем, не спрашиваем бэкенд
-        }
-
-        // 3️⃣ РЕАЛЬНЫЙ ЗАПРОС К БЭКЕНДУ (Telegram или непредвиденный случай)
-        console.log('🔄 Запрашиваем роль у бэкенда...')
-        const me = await fetchUserIdentity()
-        setIdentity(me)
-        setRole(me.role)
-        console.log('🎯 Роль определена бэкендом:', me.role)
-      } catch (err) {
-        console.error('❌ Ошибка определения роли:', err)
-        setError('Не удалось определить пользователя. Откройте приложение через Telegram.')
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    determineRole()
-  }, [])
-
-  const handleConfirm = async () => {
-    if (!sheetSlot) return
-    setConfirming(true)
-
-    try {
-      await bookSlot({
-        start_time: sheetSlot.startTime,
-        service_id: service.id,
-        name: 'Имя клиента',
-        price: service.price,
-      })
-
-      const key = `${sheetSlot.iso}-${sheetSlot.startTime}`
-      bookSlotAction(key)
-      setConfirming(false)
-      setSheetSlot(null)
-      setBookingsVersion((v) => v + 1)
-      showToast('Запись подтверждена! За 2 часа до визита пришлём напоминание 🤝')
-    } catch (err) {
-      setConfirming(false)
-      const message = err.response?.data?.message || err.message || 'Ошибка при бронировании'
-      showToast(message)
-    }
-  }
-
-  const handleOpenDetails = (booking) => {
-    setActiveBookingForSheet(booking)
-    setIsDetailsOpen(true)
-  }
-
-  const handleCancelBooking = async (bookingId) => {
-    try {
-      await cancelBooking(bookingId)
-      setIsDetailsOpen(false)
-      setActiveBookingForSheet(null)
-      setBookingsVersion((v) => v + 1)
-      showToast('Запись отменена. Время освобождено для других')
-    } catch (err) {
-      const message = err.response?.data?.message || err.message || 'Ошибка при отмене записи'
-      showToast(message)
-    }
-  }
-
-  if (loading) {
+  if (isPending) {
     return (
-      <div className="flex min-h-screen justify-center font-sans">
-        <div className="relative min-h-screen w-full max-w-[420px] bg-[#F9FAFB] shadow-2xl">
-          <div className="flex min-h-screen items-center justify-center px-6">
-            <div className="text-center">
-              <div className="mx-auto mb-4 h-12 w-12 animate-spin rounded-full border-4 border-emerald-200 border-t-emerald-600" />
-              <p className="text-sm text-slate-500">Определяем пользователя...</p>
-            </div>
+      <AppFrame>
+        <IdentitySkeleton />
+      </AppFrame>
+    )
+  }
+
+  if (isError) {
+    return (
+      <AppFrame>
+        <div className="flex min-h-screen items-center justify-center px-6">
+          <div className="text-center">
+            <h2 className="mb-2 text-lg font-bold text-slate-800">Ошибка загрузки</h2>
+            <p className="mb-4 text-sm text-slate-500">
+              {error?.message || 'Откройте приложение через Telegram.'}
+            </p>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="rounded-xl bg-emerald-600 px-5 py-2.5 text-sm font-bold text-white"
+            >
+              Повторить
+            </button>
           </div>
         </div>
-      </div>
+      </AppFrame>
     )
   }
 
-  if (error) {
+  if (identity?.role === 'master') {
     return (
-      <div className="flex min-h-screen justify-center font-sans">
-        <div className="relative min-h-screen w-full max-w-[420px] bg-[#F9FAFB] shadow-2xl">
-          <div className="flex min-h-screen items-center justify-center px-6">
-            <div className="text-center">
-              <div className="mb-3 text-4xl">⚠️</div>
-              <h2 className="mb-2 text-lg font-bold text-slate-800">Ошибка загрузки</h2>
-              <p className="text-sm text-slate-500">{error}</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // 🔥 Мастер
-  if (role === 'master') {
-    return (
-      <div className="flex min-h-screen justify-center font-sans">
-        <div className="relative min-h-screen w-full max-w-[420px] bg-[#F9FAFB] shadow-2xl">
-          <MasterPage master={identity?.master} />
-          <Toast />
-        </div>
-      </div>
-    )
-  }
-
- // 🔥 Клиент — берем invite_link от бэкенда (или из URL, если бэкенд не дал)
-  let inviteLink = identity?.invite_link
-
-  // Дополнительная страховка
-  if (!inviteLink) {
-    const urlParams = new URLSearchParams(window.location.search)
-    inviteLink = urlParams.get('startapp')
-  }
-
-  if (!inviteLink) {
-    return (
-      <div className="flex min-h-screen justify-center font-sans">
-        <div className="relative min-h-screen w-full max-w-[420px] bg-[#F9FAFB] shadow-2xl">
-          <div className="flex min-h-screen items-center justify-center px-6">
-            <div className="text-center">
-              <div className="mb-3 text-4xl">🔗</div>
-              <h2 className="mb-2 text-lg font-bold text-slate-800">Нужна ссылка мастера</h2>
-              <p className="mb-1 text-sm text-slate-500">
-                Откройте Mini App по ссылке, которую вам отправил мастер.
-              </p>
-              <p className="text-xs text-slate-400">
-                Например: <code className="rounded bg-slate-100 px-1.5 py-0.5">t.me/bot?startapp=abc123</code>
-              </p>
-            </div>
-          </div>
-          <Toast />
-        </div>
-      </div>
-    )
-  }
-
-  // 🔥 Клиент с invite_link
-  return (
-    <div className="flex min-h-screen justify-center font-sans">
-      <div className="relative min-h-screen w-full max-w-[420px] bg-[#F9FAFB] shadow-2xl">
-        {screen === 'services' ? (
-          <ServicesPage
-            inviteLink={inviteLink} // 🔥 Передаем от бэкенда
-            onPick={() => setScreen('booking')}
-            onOpenDetails={handleOpenDetails}
-            bookingsVersion={bookingsVersion}
-          />
-        ) : (
-          <BookingPage
-            inviteLink={inviteLink} // 🔥 Передаем от бэкенда
-            onBack={() => setScreen('services')}
-            onSlotClick={(startTime, iso) => setSheetSlot({ startTime, iso })}
-          />
-        )}
-
-        {sheetSlot && (
-          <ConfirmBookingSheet
-            slot={sheetSlot}
-            confirming={confirming}
-            onClose={() => setSheetSlot(null)}
-            onConfirm={handleConfirm}
-          />
-        )}
-
-        {isDetailsOpen && activeBookingForSheet && (
-          <BookingDetailsSheet
-            booking={activeBookingForSheet}
-            onClose={() => setIsDetailsOpen(false)}
-            onCancel={handleCancelBooking}
-          />
-        )}
-
+      <AppFrame>
+        <Suspense fallback={<PageFallbackSkeleton />}>
+          <MasterPage />
+        </Suspense>
         <Toast />
-      </div>
-    </div>
+      </AppFrame>
+    )
+  }
+
+  if (!inviteLink) {
+    return (
+      <AppFrame>
+        <div className="flex min-h-screen items-center justify-center px-6">
+          <div className="text-center">
+            <h2 className="mb-2 text-lg font-bold text-slate-800">Нужна ссылка мастера</h2>
+            <p className="mb-1 text-sm text-slate-500">
+              Откройте Mini App по ссылке, которую вам отправил мастер.
+            </p>
+            <p className="text-xs text-slate-400">
+              Например:{' '}
+              <code className="rounded bg-slate-100 px-1.5 py-0.5">t.me/bot?startapp=abc123</code>
+            </p>
+          </div>
+        </div>
+        <Toast />
+      </AppFrame>
+    )
+  }
+
+  const showBooking = screen === 'booking' && service
+
+  const handleConfirm = () => {
+    if (!sheetSlot || !service) return
+    bookMutation.mutate({
+      start_time: sheetSlot.startTime,
+      date: sheetSlot.iso,
+      service_id: service.id,
+      name: getClientDisplayName(),
+      price: service.price,
+      service_name: service.name,
+      service_duration: service.duration,
+    })
+  }
+
+  return (
+    <AppFrame>
+      <Suspense fallback={<PageFallbackSkeleton />}>
+        {showBooking ? (
+          <BookingPage inviteLink={inviteLink} />
+        ) : (
+          <ServicesPage inviteLink={inviteLink} />
+        )}
+      </Suspense>
+
+      {sheetSlot && (
+        <ConfirmBookingSheet
+          slot={sheetSlot}
+          confirming={bookMutation.isPending}
+          onClose={closeSlotSheet}
+          onConfirm={handleConfirm}
+        />
+      )}
+
+      {detailsBooking && (
+        <BookingDetailsSheet
+          booking={detailsBooking}
+          onClose={closeDetails}
+          onCancel={() =>
+            cancelMutation.mutate({
+              bookingId: detailsBooking.booking_id,
+              booking: detailsBooking,
+            })
+          }
+        />
+      )}
+
+      <Toast />
+    </AppFrame>
   )
 }

@@ -1,27 +1,21 @@
-import { Check, Clock, Bell } from 'lucide-react'
+import { Check, Clock, Bell, Loader2 } from 'lucide-react'
 import { SheetShell } from './SheetShell'
 import { useBookingStore } from '../../store/bookingStore'
-import { fromISO, MONTHS_GEN } from '../../lib/dates'
+import { fromISO, MONTHS_GEN, formatTimeInMasterTz } from '../../lib/dates'
 import { rub } from '../../lib/currency'
 
 export function ConfirmBookingSheet({ slot, confirming, onClose, onConfirm }) {
   const service = useBookingStore((s) => s.service)
   const date = fromISO(slot.iso)
-  
-  const time = new Date(slot.startTime)
-  const hours = String(time.getUTCHours()).padStart(2, '0')
-  const minutes = String(time.getUTCMinutes()).padStart(2, '0')
-  const timeStr = `${hours}:${minutes}`
+  const timeStr = formatTimeInMasterTz(slot.startTime)
 
   return (
     <SheetShell onClose={onClose} closableOnBackdrop={!confirming}>
       {confirming ? (
-        <div className="flex animate-pop-in flex-col items-center py-10 text-center">
-          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
-            <Check className="h-8 w-8" strokeWidth={3} />
-          </div>
-          <p className="text-lg font-bold">Запись подтверждена!</p>
-          <p className="mt-1 text-sm text-slate-400">Напомним за 2 часа до начала</p>
+        <div className="flex flex-col items-center py-10 text-center">
+          <Loader2 className="mb-4 h-10 w-10 animate-spin text-emerald-600" />
+          <p className="text-lg font-bold">Бронируем слот…</p>
+          <p className="mt-1 text-sm text-slate-400">Не закрывайте приложение</p>
         </div>
       ) : (
         <>
@@ -42,6 +36,7 @@ export function ConfirmBookingSheet({ slot, confirming, onClose, onConfirm }) {
             </span>
           </div>
           <button
+            type="button"
             onClick={onConfirm}
             className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-4 text-[15px] font-bold text-white shadow-lg shadow-emerald-600/25 transition active:scale-[0.98]"
           >

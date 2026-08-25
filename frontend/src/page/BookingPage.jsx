@@ -1,97 +1,109 @@
-import { useState, useEffect } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { ArrowLeft, Calendar, Clock } from 'lucide-react'
-import { DayPill } from '../components/ui/DayPill'
+import { QueryRetry } from '../components/AppFrame'
+import { SlotsSkeleton } from '../components/skeletons/Skeletons'
 import { CalendarDay } from '../components/ui/CalendarDay'
+import { DayPill } from '../components/ui/DayPill'
 import { NavArrow } from '../components/ui/NavArrow'
 import { SlotButton } from '../components/ui/SlotButton'
 import { SlotsLegend } from '../components/ui/SlotsLegend'
-import { WaitlistBlock } from '../widgets/WaitlistBlock'
-import { useBookingStore } from '../store/bookingStore'
-import { useDragScroll } from '../lib/useDragScroll'
-import { fetchSlots } from '../services/api'
+import { useClientBookingsQuery, useSlotsQuery } from '../hooks/useClientQueries'
 import {
-  TODAY, MONTHS_TITLE, WEEKDAYS_GRID,
-  buildQuickDays, buildMonthGrid, fromISO, toISO,
+  TODAY,
+  MONTHS_TITLE,
+  WEEKDAYS_GRID,
+  buildQuickDays,
+  buildMonthGrid,
+  fromISO,
+  toISO,
+  formatTimeInMasterTz,
 } from '../lib/dates'
 import { rub } from '../lib/currency'
+import { useDragScroll } from '../lib/useDragScroll'
+import { useBookingStore } from '../store/bookingStore'
+import { WaitlistBlock } from '../widgets/WaitlistBlock'
 
 const QUICK_DAYS = buildQuickDays()
-const MASTER_TIME_ZONE = 'Europe/Moscow' // ← Часовой пояс мастера
+const CANCELLED = new Set(['cancelled', 'canceled', 'cancelled_by_client', 'cancelled_no_show'])
 
-export function BookingPage({ inviteLink, onBack, onSlotClick }) {
+export function BookingPage({ inviteLink }) {
   const service = useBookingStore((s) => s.service)
   const selectedDate = useBookingStore((s) => s.selectedDate)
   const setDate = useBookingStore((s) => s.setDate)
-  const myBookings = useBookingStore((s) => s.myBookings)
+  const goServices = useBookingStore((s) => s.goServices)
+  const openSlotSheet = useBookingStore((s) => s.openSlotSheet)
 
   const daysScrollRef = useDragScroll()
-
-  const [slots, setSlots] = useState([])
-  const [loading, setLoading] = useState(false)
-
   const [view, setView] = useState({ year: TODAY.getFullYear(), month: TODAY.getMonth() })
+
+  const slotsQuery = useSlotsQuery(inviteLink, selectedDate, service?.id)
+  const bookingsQuery = useClientBookingsQuery()
+
   const diffMonths = (view.year - TODAY.getFullYear()) * 12 + (view.month - TODAY.getMonth())
   const canPrev = diffMonths > 0
   const canNext = diffMonths < 1
 
-  useEffect(() => {
-    if (!service) return
-    setLoading(true)
-    
-    // 🔥 ИСПРАВЛЕНО: добавлен inviteLink третьим аргументом
-    fetchSlots(selectedDate, service.id, inviteLink)
-      .then((data) => {
-        setSlots(Array.isArray(data) ? data : [])
-        setLoading(false)
-      })
-      .catch((err) => {
-        console.error('Failed to load slots:', err)
-        setSlots([])
-        setLoading(false)
-      })
-  }, [selectedDate, service, inviteLink]) // 🔥 Также добавь inviteLink в зависимости
-  const prevMonth = () =>
-    setView((v) => (v.month === 0 ? { year: v.year - 1, month: 11 } : { ...v, month: v.month - 1 }))
-  const nextMonth = () =>
-    setView((v) => (v.month === 11 ? { year: v.year + 1, month: 0 } : { ...v, month: v.month + 1 }))
+  const monthGrid = useMemo(
+    () => buildMonthGrid(view.year, view.month),
+    [view.year, view.month],
+  )
 
-  const handleSelect = (iso) => {
-    setDate(iso)
-    const d = fromISO(iso)
-    setView({ year: d.getFullYear(), month: d.getMonth() })
-  }
+  const mineTimes = useMemo(() => {
+    const set = new Set()
+    for (const b of bookingsQuery.data || []) {
+      if (CANCELLED.has(b.status?.toLowerCase())) continue
+      set.add(new Date(b.start_time).getTime())
+    }
+    return set
+  }, [bookingsQuery.data])
 
-  const selectedDateObj = fromISO(selectedDate)
+  const selectedDateObj = useMemo(() => fromISO(selectedDate), [selectedDate])
   const isToday =
     selectedDateObj.getFullYear() === TODAY.getFullYear() &&
     selectedDateObj.getMonth() === TODAY.getMonth() &&
     selectedDateObj.getDate() === TODAY.getDate()
 
-  const now = new Date()
+  const formattedSlots = useMemo(() => {
+    const now = Date.now()
+    return (slotsQuery.data || [])
+      .map((slot) => {
+        const startTime = new Date(slot.start_time)
+        return {
+          start_time: slot.start_time,
+          startMs: startTime.getTime(),
+          time: formatTimeInMasterTz(slot.start_time),
+          status: slot.status === 'booked' ? 'busy' : slot.status,
+        }
+      })
+      .filter((slot) => !isToday || slot.startMs > now)
+  }, [slotsQuery.data, isToday])
 
+  const handleSelect = useCallback(
+    (iso) => {
+      setDate(iso)
+      const d = fromISO(iso)
+      setView({ year: d.getFullYear(), month: d.getMonth() })
+    },
+    [setDate],
+  )
 
-  // ✅ Функция форматирования — парсит строку напрямую
-  const formatTimeInMasterTz = (isoString) => {
-    const timePart = isoString.split('T')[1]
-    const [hours, minutes] = timePart.split(':')
-    return `${hours}:${minutes}`
-  }
-  
-  const formattedSlots = slots
-    .map((slot) => {
-      const startTime = new Date(slot.start_time)
-      return {
-        start_time: slot.start_time,
-        startTime,
-        time: formatTimeInMasterTz(slot.start_time),
-        status: slot.status === 'booked' ? 'busy' : slot.status,
-      }
-    })
-    .filter((slot) => {
-      if (!isToday) return true
-      return slot.startTime > now
-    })
-  const isDayOff = slots.length === 0 && !loading
+  const prevMonth = useCallback(() => {
+    setView((v) => (v.month === 0 ? { year: v.year - 1, month: 11 } : { ...v, month: v.month - 1 }))
+  }, [])
+
+  const nextMonth = useCallback(() => {
+    setView((v) => (v.month === 11 ? { year: v.year + 1, month: 0 } : { ...v, month: v.month + 1 }))
+  }, [])
+
+  const handleSlotClick = useCallback(
+    (startTime) => {
+      openSlotSheet({ startTime, iso: selectedDate })
+    },
+    [openSlotSheet, selectedDate],
+  )
+
+  const slots = slotsQuery.data || []
+  const isDayOff = !slotsQuery.isPending && !slotsQuery.isError && slots.length === 0
   const isFull = formattedSlots.length > 0 && formattedSlots.every((s) => s.status !== 'free')
   const allPast = slots.length > 0 && formattedSlots.length === 0
 
@@ -99,7 +111,8 @@ export function BookingPage({ inviteLink, onBack, onSlotClick }) {
     <div className="animate-fade-up pb-16">
       <header className="flex items-center gap-3 px-5 pt-6">
         <button
-          onClick={onBack}
+          type="button"
+          onClick={goServices}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition active:scale-90"
         >
           <ArrowLeft className="h-5 w-5" />
@@ -141,23 +154,27 @@ export function BookingPage({ inviteLink, onBack, onSlotClick }) {
         </div>
 
         <div className="grid grid-cols-7 gap-1.5 text-center text-[11px] font-semibold uppercase text-slate-400">
-          {WEEKDAYS_GRID.map((w) => <span key={w} className="py-1">{w}</span>)}
+          {WEEKDAYS_GRID.map((w) => (
+            <span key={w} className="py-1">
+              {w}
+            </span>
+          ))}
         </div>
 
         <div key={`${view.year}-${view.month}`} className="mt-1.5 grid animate-fade-in grid-cols-7 gap-1.5">
-          {buildMonthGrid(view.year, view.month).map((d, i) =>
+          {monthGrid.map((d, i) =>
             d === null ? (
               <div key={`empty-${i}`} />
             ) : (
               <CalendarDay
                 key={d.toISOString()}
                 date={d}
-                selected={d.getTime() === fromISO(selectedDate).getTime()}
+                selected={d.getTime() === selectedDateObj.getTime()}
                 isToday={d.getTime() === TODAY.getTime()}
                 disabled={d < TODAY}
                 onClick={() => handleSelect(toISO(d))}
               />
-            )
+            ),
           )}
         </div>
       </section>
@@ -168,8 +185,10 @@ export function BookingPage({ inviteLink, onBack, onSlotClick }) {
           <span className="text-sm font-semibold">Время</span>
         </div>
 
-        {loading ? (
-          <div className="py-8 text-center text-sm text-slate-400">Загрузка...</div>
+        {slotsQuery.isPending ? (
+          <SlotsSkeleton />
+        ) : slotsQuery.isError ? (
+          <QueryRetry message="Не удалось загрузить слоты" onRetry={slotsQuery.refetch} />
         ) : allPast ? (
           <div className="animate-fade-in rounded-2xl border border-slate-100 bg-white p-6 text-center shadow-sm">
             <p className="text-lg font-bold text-slate-900">Все слоты на сегодня прошли</p>
@@ -185,17 +204,14 @@ export function BookingPage({ inviteLink, onBack, onSlotClick }) {
         ) : (
           <div key={selectedDate} className="animate-fade-in">
             <div className="grid grid-cols-3 gap-2.5">
-              {formattedSlots.map((slot) => {
-                const key = `${selectedDate}-${slot.start_time}`
-                return (
-                  <SlotButton
-                    key={slot.start_time}
-                    time={slot.time}
-                    status={myBookings[key] ? 'mine' : slot.status}
-                    onClick={() => onSlotClick(slot.start_time, selectedDate)}
-                  />
-                )
-              })}
+              {formattedSlots.map((slot) => (
+                <SlotButton
+                  key={slot.start_time}
+                  time={slot.time}
+                  status={mineTimes.has(slot.startMs) ? 'mine' : slot.status}
+                  onClick={() => handleSlotClick(slot.start_time)}
+                />
+              ))}
             </div>
             <SlotsLegend />
           </div>

@@ -1,35 +1,21 @@
 import { useState } from 'react'
 import { MapPin } from 'lucide-react'
 import { SheetShell } from './SheetShell'
-import { useBookingStore } from '../../store/bookingStore'
-import { updateMasterProfile } from '../../services/api'
+import { useUpdateProfileMutation } from '../../hooks/useMasterMutations'
 
-export function EditProfileSheet({ profile, onClose, onSaved }) {
-  const showToast = useBookingStore((s) => s.showToast)
-  const [saving, setSaving] = useState(false)
-
+export function EditProfileSheet({ profile, onClose }) {
+  const updateMutation = useUpdateProfileMutation()
   const [name, setName] = useState(profile?.name || '')
   const [bio, setBio] = useState(profile?.bio || '')
   const [address, setAddress] = useState(profile?.address || '')
 
-  const handleSave = async () => {
-    try {
-      setSaving(true)
-      await updateMasterProfile({ name, bio, address })
-      onClose()
-      showToast('Профиль обновлён ✨')
-      onSaved?.() // Перезагружаем данные профиля
-    } catch (err) {
-      showToast('Ошибка при сохранении профиля')
-    } finally {
-      setSaving(false)
-    }
+  const handleSave = () => {
+    updateMutation.mutate({ name, bio, address }, { onSuccess: () => onClose() })
   }
 
   return (
     <SheetShell onClose={onClose}>
       <h2 className="mb-5 text-xl font-bold text-slate-900">Редактировать профиль</h2>
-
       <div>
         <label className="mb-2 block text-sm font-semibold text-slate-500">Имя</label>
         <input
@@ -40,7 +26,6 @@ export function EditProfileSheet({ profile, onClose, onSaved }) {
           className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3.5 text-base font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
         />
       </div>
-
       <div className="mt-3">
         <label className="mb-2 block text-sm font-semibold text-slate-500">Специализация</label>
         <input
@@ -51,7 +36,6 @@ export function EditProfileSheet({ profile, onClose, onSaved }) {
           className="w-full rounded-xl border-0 bg-slate-100 px-4 py-3.5 text-base font-medium text-slate-900 outline-none transition placeholder:text-slate-400 focus:bg-emerald-50 focus:ring-2 focus:ring-emerald-500"
         />
       </div>
-
       <div className="mt-3">
         <label className="mb-2 block text-sm font-semibold text-slate-500">Адрес студии</label>
         <div className="relative">
@@ -65,13 +49,13 @@ export function EditProfileSheet({ profile, onClose, onSaved }) {
           />
         </div>
       </div>
-
       <button
+        type="button"
         onClick={handleSave}
-        disabled={saving}
+        disabled={updateMutation.isPending}
         className="mt-6 w-full rounded-xl bg-emerald-500 py-4 font-bold text-white shadow-lg shadow-emerald-500/25 transition active:scale-[0.98] disabled:opacity-50"
       >
-        {saving ? 'Сохранение...' : 'Сохранить'}
+        {updateMutation.isPending ? 'Сохранение...' : 'Сохранить'}
       </button>
     </SheetShell>
   )

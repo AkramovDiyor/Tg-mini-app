@@ -33,8 +33,21 @@ export const fromISO = (iso) => {
 
 export const daysFromToday = (d) => Math.round((startOfDay(d) - TODAY) / 86400000)
 
+export const MASTER_TIME_ZONE = 'Europe/Moscow'
+
 export const formatTime = (d) =>
   `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+
+/** Время слота в поясе мастера, не UTC браузера. */
+export function formatTimeInMasterTz(isoString) {
+  if (!isoString) return ''
+  return new Date(isoString).toLocaleTimeString('ru-RU', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: MASTER_TIME_ZONE,
+  })
+}
 
 export function buildQuickDays(count = 7) {
   const res = []

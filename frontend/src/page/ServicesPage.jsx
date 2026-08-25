@@ -1,49 +1,53 @@
-import { useEffect, useState } from 'react'
-import { User, Star, Image } from 'lucide-react'
+import { useCallback } from 'react'
+import { Image, Star, User } from 'lucide-react'
+import { QueryRetry } from '../components/AppFrame'
+import { ServicesSkeleton } from '../components/skeletons/Skeletons'
 import { ServiceCard } from '../components/ui/ServiceCard'
-import { ActiveBookingBar } from '../widgets/ActiveBookingBar'
-import { useBookingStore } from '../store/bookingStore'
+import { useMasterInfoQuery, useServicesQuery } from '../hooks/useClientQueries'
 import { useDragScroll } from '../lib/useDragScroll'
-import { fetchServices, fetchMasterInfo, normalizePhotoUrl } from '../services/api'
+import { normalizePhotoUrl } from '../services/api'
+import { useBookingStore } from '../store/bookingStore'
+import { ActiveBookingBar } from '../widgets/ActiveBookingBar'
 
-export function ServicesPage({ inviteLink, onPick, onOpenDetails, bookingsVersion }) {
+export function ServicesPage({ inviteLink }) {
   const pickService = useBookingStore((s) => s.pickService)
+  const openDetails = useBookingStore((s) => s.openDetails)
   const galleryRef = useDragScroll()
 
-  const [services, setServices] = useState([])
-  const [profile, setProfile] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const servicesQuery = useServicesQuery(inviteLink)
+  const infoQuery = useMasterInfoQuery(inviteLink)
 
-  useEffect(() => {
-    if (!inviteLink) {
-      console.error('invite_link is required to fetch services and master info')
-      setLoading(false)
-      return
-    }
-
-    console.log('Fetching services and master info for invite link:', inviteLink)
-
-    Promise.all([
-      fetchServices(inviteLink).catch((err) => {
-        console.error('Failed to load services:', err)
-        return []
-      }),
-      fetchMasterInfo(inviteLink).catch((err) => {
-        console.error('Failed to load master info:', err)
-        return null
-      }),
-    ])
-      .then(([servicesData, profileData]) => {
-        setServices(Array.isArray(servicesData) ? servicesData : [])
-        setProfile(profileData)
-        setLoading(false)
+  const handlePick = useCallback(
+    (service) => {
+      pickService({
+        id: service.id,
+        name: service.name,
+        price: service.price,
+        duration: service.duration_min,
+        icon: User,
       })
-      .catch((err) => {
-        console.error('Error occurred while fetching services or master info:', err)
-        setLoading(false)
-      })
-  }, [inviteLink])
+    },
+    [pickService],
+  )
 
+  if (servicesQuery.isPending || infoQuery.isPending) {
+    return <ServicesSkeleton />
+  }
+
+  if (servicesQuery.isError && infoQuery.isError) {
+    return (
+      <QueryRetry
+        message="Не удалось загрузить страницу мастера"
+        onRetry={() => {
+          servicesQuery.refetch()
+          infoQuery.refetch()
+        }}
+      />
+    )
+  }
+
+  const services = servicesQuery.data || []
+  const profile = infoQuery.data
   const masterName = profile?.name || 'Мастер'
   const masterBio = profile?.bio || 'Барбер'
   const masterRating = profile?.rating || null
@@ -66,17 +70,8 @@ export function ServicesPage({ inviteLink, onPick, onOpenDetails, bookingsVersio
           <h1 className="mt-4 text-2xl font-bold text-white">{masterName}</h1>
 
           <span className="mt-2.5 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white backdrop-blur">
-            {masterRating ? (
-              <>
-                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                {masterRating} · {masterBio}
-              </>
-            ) : (
-              <>
-                <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
-                {masterBio}
-              </>
-            )}
+            <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
+            {masterRating ? `${masterRating} · ${masterBio}` : masterBio}
           </span>
         </div>
       </div>
@@ -113,8 +108,8 @@ export function ServicesPage({ inviteLink, onPick, onOpenDetails, bookingsVersio
 
         <h2 className="mt-6 px-5 text-lg font-bold text-slate-900">Услуги</h2>
         <div className="mt-3 px-5">
-          {loading ? (
-            <div className="py-8 text-center text-sm text-slate-400">Загрузка...</div>
+          {servicesQuery.isError ? (
+            <QueryRetry message="Не удалось загрузить услуги" onRetry={servicesQuery.refetch} />
           ) : (
             services.map((service) => (
               <ServiceCard
@@ -126,23 +121,14 @@ export function ServicesPage({ inviteLink, onPick, onOpenDetails, bookingsVersio
                   duration: service.duration_min,
                   icon: User,
                 }}
-                onClick={() => {
-                  pickService({
-                    id: service.id,
-                    name: service.name,
-                    price: service.price,
-                    duration: service.duration_min,
-                    icon: User,
-                  })
-                  onPick()
-                }}
+                onClick={() => handlePick(service)}
               />
             ))
           )}
         </div>
       </div>
 
-      <ActiveBookingBar key={bookingsVersion} onOpenDetails={onOpenDetails} />
+      <ActiveBookingBar onOpenDetails={openDetails} />
     </div>
   )
 }

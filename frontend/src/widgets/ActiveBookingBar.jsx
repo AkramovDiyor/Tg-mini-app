@@ -1,65 +1,40 @@
-import { useEffect, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Scissors, ChevronRight } from 'lucide-react'
-import { getBookingTimeLabel, formatTimeFromISO } from '../lib/dates'
-import { fetchClientBookings } from '../services/api'
+import { useClientBookingsQuery } from '../hooks/useClientQueries'
+import { formatTimeInMasterTz } from '../lib/dates'
+
+const CANCELLED = new Set([
+  'cancelled',
+  'canceled',
+  'rejected',
+  'declined',
+  'cancelled_by_client',
+  'cancelled_no_show',
+])
 
 export function ActiveBookingBar({ onOpenDetails }) {
-  const [activeBooking, setActiveBooking] = useState(null)
-  const [loading, setLoading] = useState(true)
-  const [now, setNow] = useState(() => new Date())
+  const { data: bookings = [], isPending } = useClientBookingsQuery()
+  const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
-    loadBookings()
-  }, [])
-
-  useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 60000)
+    const t = setInterval(() => setNow(Date.now()), 60_000)
     return () => clearInterval(t)
   }, [])
 
-  useEffect(() => {
-    const t = setInterval(() => loadBookings(), 60000)
-    return () => clearInterval(t)
-  }, [])
+  const activeBooking = useMemo(() => {
+    return bookings
+      .filter((b) => {
+        if (CANCELLED.has(b.status?.toLowerCase())) return false
+        return new Date(b.start_time).getTime() > now
+      })
+      .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))[0]
+  }, [bookings, now])
 
-  const loadBookings = async () => {
-    try {
-      setLoading(true)
-      const bookings = await fetchClientBookings()
-
-      if (!Array.isArray(bookings)) {
-        setActiveBooking(null)
-        return
-      }
-
-      const nowTime = new Date()
-      const CANCEL_STATUSES = ['cancelled', 'canceled', 'rejected', 'declined']
-
-      const futureBookings = bookings
-        .filter((b) => {
-          if (CANCEL_STATUSES.includes(b.status?.toLowerCase())) return false
-          return new Date(b.start_time) > nowTime
-        })
-        .sort((a, b) => new Date(a.start_time) - new Date(b.start_time))
-
-      setActiveBooking(futureBookings[0] || null)
-    } catch (err) {
-      console.error('Failed to load bookings:', err)
-      setActiveBooking(null)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (loading || !activeBooking) {
-    return null
-  }
-
-  // ✅ Извлекаем время напрямую из строки
-  const timeStr = formatTimeFromISO(activeBooking.start_time)
+  if (isPending || !activeBooking) return null
 
   return (
     <button
+      type="button"
       onClick={() => onOpenDetails(activeBooking)}
       className="fixed bottom-4 left-1/2 z-40 w-[calc(100%-2.5rem)] max-w-[380px] -translate-x-1/2 animate-fade-up"
     >
@@ -69,7 +44,7 @@ export function ActiveBookingBar({ onOpenDetails }) {
         </span>
         <span className="mx-3 flex min-w-0 flex-1 flex-col items-start text-left">
           <span className="text-xs font-bold text-emerald-400">
-            {timeStr}
+            {formatTimeInMasterTz(activeBooking.start_time)}
           </span>
           <span className="w-full truncate text-sm font-semibold">
             {activeBooking.service_name || 'Услуга'}

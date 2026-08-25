@@ -1,14 +1,14 @@
+import { useState } from 'react'
 import { Frown, CheckCircle2 } from 'lucide-react'
 import { useBookingStore } from '../store/bookingStore'
 
 export function WaitlistBlock({ iso }) {
-  const joined = useBookingStore((s) => !!s.waitlist[iso])
-  const joinWaitlist = useBookingStore((s) => s.joinWaitlist)
+  const [joined, setJoined] = useState(false)
   const showToast = useBookingStore((s) => s.showToast)
 
   const handleJoin = () => {
-    joinWaitlist(iso)
-    showToast('Ты в листе ожидания! Бот напишет, как только появится окно 🔔')
+    setJoined(true)
+    showToast('Ты в листе ожидания! Бот напишет, как только появится окно')
   }
 
   return (
@@ -30,6 +30,7 @@ export function WaitlistBlock({ iso }) {
         </div>
       ) : (
         <button
+          type="button"
           onClick={handleJoin}
           className="mt-5 w-full rounded-xl bg-emerald-600 px-4 py-4 text-[15px] font-bold leading-snug text-white shadow-lg shadow-emerald-600/25 transition active:scale-[0.98]"
         >

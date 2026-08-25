@@ -11,12 +11,10 @@ export function MasterPage() {
   return (
     <div className="pb-28">
       <div className="px-5 pt-6">
-        {/* key={tab} заставляет React перемонтировать блок при смене вкладки
-            → срабатывает animate-fade-up для плавного появления */}
-        <div key={tab} className="animate-fade-up">
-          {tab === 'today'   && <TodayTab />}
-          {tab === 'queue'   && <QueueTab />}
-          {tab === 'studio'  && <StudioTab />}
+        <div className="animate-fade-up">
+          {tab === 'today' && <TodayTab />}
+          {tab === 'queue' && <QueueTab />}
+          {tab === 'studio' && <StudioTab />}
           {tab === 'profile' && <ProfileTab />}
         </div>
       </div>

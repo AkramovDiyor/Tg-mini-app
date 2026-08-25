@@ -1,146 +1,91 @@
-import { useState, useEffect, useRef } from 'react'
-import {
-  Clock, Plus, User, Trash2,
-} from 'lucide-react'
-import { useBookingStore } from '../../store/bookingStore'
-import { rub } from '../../lib/currency'
-import {
-  fetchMasterProfile, fetchMasterServices, updateSettings,
-  fetchPhotos, deletePhoto, normalizePhotoUrl,
-} from '../../services/api'
+import { useEffect, useRef, useState } from 'react'
+import { Clock, Plus, User, Trash2 } from 'lucide-react'
+import { QueryRetry } from '../../components/AppFrame'
+import { MasterListSkeleton } from '../../components/skeletons/Skeletons'
 import { Toggle } from '../../components/ui/Toggle'
 import { AddServiceSheet } from '../../components/sheets/AddServiceSheet'
 import { EditServiceSheet } from '../../components/sheets/EditServiceSheet'
 import { AddPhotoSheet } from '../../components/sheets/AddPhotoSheet'
+import {
+  useMasterProfileQuery,
+  useMasterServicesQuery,
+  usePhotosQuery,
+} from '../../hooks/useMasterQueries'
+import {
+  useUpdateSettingsMutation,
+  useDeletePhotoMutation,
+} from '../../hooks/useMasterMutations'
+import { rub } from '../../lib/currency'
+import { normalizePhotoUrl } from '../../services/api'
+import { useBookingStore } from '../../store/bookingStore'
 
 const WEEK_TAGS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
 export function StudioTab() {
   const showToast = useBookingStore((s) => s.showToast)
+  const profileQuery = useMasterProfileQuery()
+  const servicesQuery = useMasterServicesQuery()
+  const photosQuery = usePhotosQuery()
+  const settingsMutation = useUpdateSettingsMutation()
+  const deletePhotoMutation = useDeletePhotoMutation()
 
-  // === Услуги ===
-  const [servicesVersion, setServicesVersion] = useState(0)
-  const [services, setServices] = useState([])
   const [isAddServiceOpen, setIsAddServiceOpen] = useState(false)
   const [editingService, setEditingService] = useState(null)
-
-  // === График работы + настройки (из профиля) ===
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [workDays, setWorkDays] = useState([true, true, true, true, true, false, false])
   const [hours, setHours] = useState({
-    start: '09:00', end: '20:00', lunchFrom: '13:00', lunchTo: '14:00',
+    start: '09:00',
+    end: '20:00',
+    lunchFrom: '13:00',
+    lunchTo: '14:00',
   })
-
-  // === Правила записи ===
   const [autoCancel, setAutoCancel] = useState(true)
   const [cancelHours, setCancelHours] = useState('2')
   const [offerWaitlist, setOfferWaitlist] = useState(true)
-
-  // === Фото работ ===
-  const [photos, setPhotos] = useState([])
-  const [photosVersion, setPhotosVersion] = useState(0)
   const [selectedFile, setSelectedFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState(null)
   const [isAddPhotoOpen, setIsAddPhotoOpen] = useState(false)
   const fileInputRef = useRef(null)
 
   useEffect(() => {
-    loadStudioData()
-  }, [])
+    const profileData = profileQuery.data
+    if (!profileData) return
 
-  useEffect(() => {
-    loadPhotos()
-  }, [])
-
-  const loadStudioData = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      const [profileData, servicesData] = await Promise.all([
-        fetchMasterProfile(),
-        fetchMasterServices(),
-      ])
-
-      setServices(Array.isArray(servicesData) ? servicesData : [])
-
-      if (profileData?.work_hours) {
-        const wh = profileData.work_hours
-        if (Array.isArray(wh.work_days) && wh.work_days.length === 7) {
-          if (typeof wh.work_days[0] === 'boolean') {
-            setWorkDays(wh.work_days)
-          } else {
-            setWorkDays([1, 2, 3, 4, 5, 6, 7].map((d) => wh.work_days.includes(d)))
-          }
-        }
-        setHours({
-          start: wh.start_time || wh.start || '09:00',
-          end: wh.end_time || wh.end || '20:00',
-          lunchFrom: wh.lunch_start || wh.lunchFrom || '13:00',
-          lunchTo: wh.lunch_end || wh.lunchTo || '14:00',
-        })
+    if (profileData.work_hours) {
+      const wh = profileData.work_hours
+      if (Array.isArray(wh.work_days) && wh.work_days.length === 7) {
+        if (typeof wh.work_days[0] === 'boolean') setWorkDays(wh.work_days)
+        else setWorkDays([1, 2, 3, 4, 5, 6, 7].map((d) => wh.work_days.includes(d)))
       }
-
-      if (profileData?.settings) {
-        setAutoCancel(profileData.settings.auto_cancel ?? true)
-        setCancelHours(profileData.settings.cancel_hours || '2')
-        setOfferWaitlist(profileData.settings.offer_waitlist ?? true)
-      }
-    } catch (err) {
-      console.error('Failed to load studio data:', err)
-      setError('Не удалось загрузить данные')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadPhotos = async () => {
-    try {
-      const data = await fetchPhotos()
-      setPhotos(Array.isArray(data) ? data : [])
-    } catch (err) {
-      console.error('Failed to load photos:', err)
-      setPhotos([])
-    }
-  }
-
-  const refreshServices = () => {
-    setServicesVersion((v) => v + 1)
-    loadStudioData()
-  }
-
-  const refreshPhotos = () => {
-    setPhotosVersion((v) => v + 1)
-    loadPhotos()
-  }
-
-  const toggleDay = (i) =>
-    setWorkDays((days) => days.map((d, idx) => (idx === i ? !d : d)))
-
-  const handleSaveSettings = async () => {
-    try {
-      await updateSettings({
-        work_hours: {
-          work_days: workDays,
-          start_time: hours.start,
-          end_time: hours.end,
-          lunch_start: hours.lunchFrom,
-          lunch_end: hours.lunchTo,
-        },
-        settings: {
-          auto_cancel: autoCancel,
-          cancel_hours: cancelHours,
-          offer_waitlist: offerWaitlist,
-        },
+      setHours({
+        start: wh.start_time || wh.start || '09:00',
+        end: wh.end_time || wh.end || '20:00',
+        lunchFrom: wh.lunch_start || wh.lunchFrom || '13:00',
+        lunchTo: wh.lunch_end || wh.lunchTo || '14:00',
       })
-      showToast('Настройки сохранены ✨')
-    } catch (err) {
-      showToast('Ошибка при сохранении настроек')
     }
-  }
 
-  const handlePickPhoto = () => {
-    fileInputRef.current?.click()
+    if (profileData.settings) {
+      setAutoCancel(profileData.settings.auto_cancel ?? true)
+      setCancelHours(profileData.settings.cancel_hours || '2')
+      setOfferWaitlist(profileData.settings.offer_waitlist ?? true)
+    }
+  }, [profileQuery.data])
+
+  const handleSaveSettings = () => {
+    settingsMutation.mutate({
+      work_hours: {
+        work_days: workDays,
+        start_time: hours.start,
+        end_time: hours.end,
+        lunch_start: hours.lunchFrom,
+        lunch_end: hours.lunchTo,
+      },
+      settings: {
+        auto_cancel: autoCancel,
+        cancel_hours: cancelHours,
+        offer_waitlist: offerWaitlist,
+      },
+    })
   }
 
   const handleFileChange = (e) => {
@@ -160,45 +105,19 @@ export function StudioTab() {
     e.target.value = ''
   }
 
-  const handleDeletePhoto = async (photoId) => {
-    try {
-      await deletePhoto(photoId)
-      showToast('Фото удалено 🗑')
-      refreshPhotos()
-    } catch (err) {
-      const message = err.response?.data?.message || err.message || 'Ошибка при удалении'
-      showToast(message)
-    }
+  if (profileQuery.isPending || servicesQuery.isPending) return <MasterListSkeleton />
+
+  if (profileQuery.isError) {
+    return <QueryRetry message="Не удалось загрузить данные" onRetry={profileQuery.refetch} />
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <p className="text-sm text-slate-400">Загрузка...</p>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <p className="text-sm text-red-500">{error}</p>
-        <button
-          onClick={loadStudioData}
-          className="mt-4 rounded-xl bg-emerald-500 px-6 py-2.5 text-sm font-bold text-white transition active:scale-95"
-        >
-          Повторить
-        </button>
-      </div>
-    )
-  }
+  const services = servicesQuery.data || []
+  const photos = photosQuery.data || []
 
   return (
     <div className="pb-24">
-      {/* ===== ПРИМЕРЫ РАБОТ ===== */}
-      <section key={`photos-${photosVersion}`} className="mb-6">
+      <section className="mb-6">
         <h2 className="mb-2 px-1 text-base font-bold text-slate-800">Примеры работ</h2>
-
         <input
           ref={fileInputRef}
           type="file"
@@ -206,7 +125,6 @@ export function StudioTab() {
           onChange={handleFileChange}
           className="hidden"
         />
-
         <div className="flex gap-3 overflow-x-auto pb-2">
           {photos.map((photo) => (
             <div
@@ -220,7 +138,8 @@ export function StudioTab() {
               />
               <div className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-black/50 to-transparent" />
               <button
-                onClick={() => handleDeletePhoto(photo.id)}
+                type="button"
+                onClick={() => deletePhotoMutation.mutate(photo.id)}
                 className="absolute right-2 top-2 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm transition active:scale-90"
                 aria-label="Удалить фото"
               >
@@ -228,29 +147,21 @@ export function StudioTab() {
               </button>
             </div>
           ))}
-
           <button
-            onClick={handlePickPhoto}
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
             className="flex h-32 w-40 shrink-0 flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-slate-300 bg-white/50 text-slate-400 transition active:scale-95"
           >
-            {photos.length === 0 ? (
-              <>
-                <Plus className="h-7 w-7" />
-                <span className="text-xs font-semibold">Добавить фото</span>
-              </>
-            ) : (
-              <>
-                <Plus className="h-6 w-6" />
-                <span className="text-[11px] font-semibold">Ещё</span>
-              </>
-            )}
+            <Plus className={photos.length === 0 ? 'h-7 w-7' : 'h-6 w-6'} />
+            <span className="text-xs font-semibold">
+              {photos.length === 0 ? 'Добавить фото' : 'Ещё'}
+            </span>
           </button>
         </div>
       </section>
 
       <div className="space-y-6">
-        {/* ===== УСЛУГИ ===== */}
-        <section key={servicesVersion}>
+        <section>
           <h2 className="mb-2 text-base font-bold text-slate-800">Услуги</h2>
           <div className="rounded-2xl bg-white p-4 shadow-sm">
             <div className="space-y-2">
@@ -260,6 +171,7 @@ export function StudioTab() {
                 services.map((service) => (
                   <button
                     key={service.id}
+                    type="button"
                     onClick={() => setEditingService(service)}
                     className="flex w-full items-center gap-3 rounded-xl bg-slate-50 p-3 text-left transition active:scale-[0.98]"
                   >
@@ -281,6 +193,7 @@ export function StudioTab() {
               )}
             </div>
             <button
+              type="button"
               onClick={() => setIsAddServiceOpen(true)}
               className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 py-3 font-semibold text-slate-500 transition active:scale-[0.98]"
             >
@@ -290,7 +203,6 @@ export function StudioTab() {
           </div>
         </section>
 
-        {/* ===== ГРАФИК РАБОТЫ ===== */}
         <section>
           <h2 className="mb-2 text-base font-bold text-slate-800">График работы</h2>
           <div className="rounded-2xl bg-white p-4 shadow-sm">
@@ -300,7 +212,10 @@ export function StudioTab() {
                 return (
                   <button
                     key={tag}
-                    onClick={() => toggleDay(i)}
+                    type="button"
+                    onClick={() =>
+                      setWorkDays((days) => days.map((d, idx) => (idx === i ? !d : d)))
+                    }
                     className={`h-10 rounded-full px-4 text-sm font-bold transition ${
                       isWork
                         ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/25 active:scale-95'
@@ -355,7 +270,6 @@ export function StudioTab() {
           </div>
         </section>
 
-        {/* ===== ПРАВИЛА ЗАПИСИ ===== */}
         <section>
           <h2 className="mb-2 text-base font-bold text-slate-800">Правила записи</h2>
           <div className="rounded-2xl bg-white p-4 shadow-sm">
@@ -368,12 +282,15 @@ export function StudioTab() {
               <div className="mt-3 animate-fade-in rounded-xl bg-slate-50 p-3">
                 <p className="text-xs leading-relaxed text-slate-500">
                   Отменять запись, если клиент не подтвердил её за{' '}
-                  <b className="text-slate-700">{cancelHours} {cancelHours === '1' ? 'час' : 'часа'}</b>
+                  <b className="text-slate-700">
+                    {cancelHours} {cancelHours === '1' ? 'час' : 'часа'}
+                  </b>
                 </p>
                 <div className="mt-2 flex gap-2">
                   {['1', '2', '4'].map((h) => (
                     <button
                       key={h}
+                      type="button"
                       onClick={() => setCancelHours(h)}
                       className={`flex-1 rounded-xl py-2 text-xs font-bold transition ${
                         cancelHours === h
@@ -391,7 +308,9 @@ export function StudioTab() {
             <div className="mt-4 border-t border-slate-100 pt-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">Предлагать окно в лист ожидания</p>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Предлагать окно в лист ожидания
+                  </p>
                   <p className="mt-0.5 text-xs text-slate-400">
                     Бот сам предложит освободившееся время клиентам из очереди
                   </p>
@@ -399,29 +318,25 @@ export function StudioTab() {
                 <Toggle checked={offerWaitlist} onChange={setOfferWaitlist} />
               </div>
             </div>
-
           </div>
-            <button
-              onClick={handleSaveSettings}
-              className="mt-4 w-full rounded-xl bg-emerald-500 py-3 font-bold text-white transition active:scale-[0.98]"
-            >
-              Сохранить настройки
-            </button>
+          <button
+            type="button"
+            onClick={handleSaveSettings}
+            disabled={settingsMutation.isPending}
+            className="mt-4 w-full rounded-xl bg-emerald-500 py-3 font-bold text-white transition active:scale-[0.98] disabled:opacity-50"
+          >
+            {settingsMutation.isPending ? 'Сохранение...' : 'Сохранить настройки'}
+          </button>
         </section>
       </div>
 
-      {/* Модалки */}
       {isAddServiceOpen && (
-        <AddServiceSheet
-          onClose={() => setIsAddServiceOpen(false)}
-          onCreated={refreshServices}
-        />
+        <AddServiceSheet onClose={() => setIsAddServiceOpen(false)} />
       )}
       {editingService && (
         <EditServiceSheet
           service={editingService}
           onClose={() => setEditingService(null)}
-          onSaved={refreshServices}
         />
       )}
       {isAddPhotoOpen && (
@@ -433,7 +348,6 @@ export function StudioTab() {
             setSelectedFile(null)
             setPreviewUrl(null)
           }}
-          onUploaded={refreshPhotos}
         />
       )}
     </div>
