@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"backend/pkg/telegram"
 	"context"
+	"log"
 	"net/http"
 )
 
@@ -35,37 +37,73 @@ const TgIDKey contextKey = "tg_id"
 // 	}
 // }
 
+// func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
+//     return func(next http.Handler) http.Handler {
+//         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//             initData := r.Header.Get("X-Telegram-Init-Data")
+//             if initData == "" {
+//                 http.Error(w, "Unauthorized", http.StatusUnauthorized)
+//                 return
+//             }
+
+//             // ВРЕМЕННО ДЛЯ ПОСТМАНА:
+//             var tgID int64
+//             if initData == "test-vasya" {
+//                 tgID = 777111222 // ID клиента
+//             } else if initData == "test-pedro" {
+//                 tgID = 999999 // ВСТАВЬ СЮДА РЕАЛЬНЫЙ ID ИЗ БАЗЫ!
+//             } else {
+//                 http.Error(w, "Unauthorized", http.StatusUnauthorized)
+//                 return
+//             }
+
+//             // РЕАЛЬНУЮ КРИПТУ ВОТ ТУТ ВРЕМЕННО ОТКЛЮЧИ:
+//             /*
+//             tgID, err := telegram.ValidateInitData(initData, tgBotToken)
+//             if err != nil {
+//                 http.Error(w, "Unauthorized: Invalid Signature", http.StatusUnauthorized)
+//                 return
+//             }
+//             */
+//             // И исправь имя переменной ниже с err на обычное присвоение, если компилятор ругается.
+//             ctx := context.WithValue(r.Context(), TgIDKey, tgID)
+//             next.ServeHTTP(w, r.WithContext(ctx))
+//         })
+//     }
+// }
+
+
 func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
-    return func(next http.Handler) http.Handler {
-        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            initData := r.Header.Get("X-Telegram-Init-Data")
-            if initData == "" {
-                http.Error(w, "Unauthorized", http.StatusUnauthorized)
-                return
-            }
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			initData := r.Header.Get("X-Telegram-Init-Data")
+			if initData == "" {
+				http.Error(w, "Unauthorized: Missing Telegram Init Data", http.StatusUnauthorized)
+				return
+			}
 
-            // ВРЕМЕННО ДЛЯ ПОСТМАНА:
-            var tgID int64
-            if initData == "test-vasya" {
-                tgID = 777111222 // ID клиента
-            } else if initData == "test-pedro" {
-                tgID = 999999 // ВСТАВЬ СЮДА РЕАЛЬНЫЙ ID ИЗ БАЗЫ!
-            } else {
-                http.Error(w, "Unauthorized", http.StatusUnauthorized)
-                return
-            }
+			// 🔥 ДЛЯ РАЗРАБОТКИ: тестовые токены
+			var tgID int64
+			if initData == "test-vasya" {
+				tgID = 777111222
+				log.Printf("🧪 Тестовая авторизация: vasya (tgID=%d)", tgID)
+			} else if initData == "test-master" {
+				tgID = 999999
+				log.Printf("🧪 Тестовая авторизация: master (tgID=%d)", tgID)
+			} else {
+				// 🔥 НАСТОЯЩАЯ ВАЛИДАЦИЯ для продакшена
+				var err error
+				tgID, err = telegram.ValidateInitData(initData, tgBotToken)
+				if err != nil {
+					log.Printf("❌ Ошибка валидации initData: %v", err)
+					http.Error(w, "Unauthorized: Invalid Signature", http.StatusUnauthorized)
+					return
+				}
+				log.Printf("✅ Реальная авторизация через Telegram: tgID=%d", tgID)
+			}
 
-            // РЕАЛЬНУЮ КРИПТУ ВОТ ТУТ ВРЕМЕННО ОТКЛЮЧИ:
-            /*
-            tgID, err := telegram.ValidateInitData(initData, tgBotToken)
-            if err != nil {
-                http.Error(w, "Unauthorized: Invalid Signature", http.StatusUnauthorized)
-                return
-            }
-            */
-            // И исправь имя переменной ниже с err на обычное присвоение, если компилятор ругается.
-            ctx := context.WithValue(r.Context(), TgIDKey, tgID)
-            next.ServeHTTP(w, r.WithContext(ctx))
-        })
-    }
+			ctx := context.WithValue(r.Context(), TgIDKey, tgID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }

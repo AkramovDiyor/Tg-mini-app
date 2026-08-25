@@ -7,19 +7,10 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// type Config struct {
-// 	DBHost     string
-// 	DBPort     string
-// 	DBUser     string
-// 	DBPassword string
-// 	DBName     string
-// 	TgBotToken string
-// 	WebAppURL  string // 🔥 НОВОЕ
-// }
-
 type Config struct {
 	DatabaseURL string
 	TgBotToken  string
+	WebAppURL   string // 🔥 ВОЗВРАЩАЕМ
 }
 
 func Load() (Config, error) {
@@ -28,23 +19,18 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		// DBHost:     os.Getenv("DB_HOST"),
-		// DBPort:     os.Getenv("DB_PORT"),
-		// DBUser:     os.Getenv("DB_USER"),
-		// DBPassword: os.Getenv("DB_PASSWORD"),
-		// DBName:     os.Getenv("DB_NAME"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		TgBotToken:  os.Getenv("TG_BOT_TOKEN"),
-		// WebAppURL:  os.Getenv("WEB_APP_URL"), // 🔥 НОВОЕ
+		WebAppURL:   os.Getenv("WEB_APP_URL"), // 🔥 ВОЗВРАЩАЕМ
 	}
 
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("пропущены обязательные настройки БД (DATABASE_URL)")
 	}
 
-	// if cfg.TgBotToken == "" {
-	// 	return Config{}, fmt.Errorf("пропущен TG_BOT_TOKEN")
-	// }
+	if cfg.TgBotToken == "" {
+		return Config{}, fmt.Errorf("пропущен TG_BOT_TOKEN")
+	}
 
 	return cfg, nil
 }
