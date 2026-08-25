@@ -18,7 +18,7 @@ import { rub } from '../lib/currency'
 const QUICK_DAYS = buildQuickDays()
 const MASTER_TIME_ZONE = 'Europe/Moscow' // ← Часовой пояс мастера
 
-export function BookingPage({ onBack, onSlotClick }) {
+export function BookingPage({ inviteLink, onBack, onSlotClick }) {
   const service = useBookingStore((s) => s.service)
   const selectedDate = useBookingStore((s) => s.selectedDate)
   const setDate = useBookingStore((s) => s.setDate)
@@ -37,7 +37,9 @@ export function BookingPage({ onBack, onSlotClick }) {
   useEffect(() => {
     if (!service) return
     setLoading(true)
-    fetchSlots(selectedDate, service.id)
+    
+    // 🔥 ИСПРАВЛЕНО: добавлен inviteLink третьим аргументом
+    fetchSlots(selectedDate, service.id, inviteLink)
       .then((data) => {
         setSlots(Array.isArray(data) ? data : [])
         setLoading(false)
@@ -47,8 +49,7 @@ export function BookingPage({ onBack, onSlotClick }) {
         setSlots([])
         setLoading(false)
       })
-  }, [selectedDate, service])
-
+  }, [selectedDate, service, inviteLink]) // 🔥 Также добавь inviteLink в зависимости
   const prevMonth = () =>
     setView((v) => (v.month === 0 ? { year: v.year - 1, month: 11 } : { ...v, month: v.month - 1 }))
   const nextMonth = () =>

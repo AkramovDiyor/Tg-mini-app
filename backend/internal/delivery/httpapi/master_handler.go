@@ -247,18 +247,21 @@ func (h *MasterHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
     tgID, err := GetIDFromContext(r.Context())
     if err != nil {
         http.Error(w, err.Error(), http.StatusUnauthorized)
+        log.Printf("❌ Unauthorized access attempt: %v", err)
         return
     }
 
     master, err := h.masterRepo.GetMasterByTelegramID(r.Context(), tgID)
     if err != nil {
         http.Error(w, "Master not found", http.StatusNotFound)
+        log.Printf("❌ Master not found for Telegram ID %d: %v", tgID, err)
         return
     }
 
     var req UpdateSettingsRequest
     if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
         http.Error(w, "Invalid JSON format", http.StatusBadRequest)
+        log.Printf("❌ Failed to decode JSON for master %d: %v", master.ID, err)
         return
     }
 
@@ -266,12 +269,14 @@ func (h *MasterHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
     workHours, err := mapToWorkHours(req.WorkHours)
     if err != nil {
         http.Error(w, fmt.Sprintf("Invalid work_hours format: %v", err), http.StatusBadRequest)
+        log.Printf("❌ Invalid work_hours format for master %d: %v", master.ID, err)
         return
     }
 
     settings, err := mapToSettings(req.Settings)
     if err != nil {
         http.Error(w, fmt.Sprintf("Invalid settings format: %v", err), http.StatusBadRequest)
+        log.Printf("❌ Invalid settings format for master %d: %v", master.ID, err)
         return
     }
 
@@ -279,6 +284,7 @@ func (h *MasterHandler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
     err = h.masterRepo.UpdateMasterSettings(r.Context(), master.ID, workHours, settings)
     if err != nil {
         http.Error(w, fmt.Sprintf("Failed to update settings: %v", err), http.StatusInternalServerError)
+        log.Printf("❌ Failed to update settings for master %d: %v", master.ID, err)
         return
     }
 

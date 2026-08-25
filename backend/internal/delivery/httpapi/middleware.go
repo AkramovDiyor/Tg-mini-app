@@ -24,6 +24,7 @@ func GetStartParamFromContext(ctx context.Context) string {
 	return startParam
 }
 
+
 func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -39,14 +40,20 @@ func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
 			// 🔥 ДЛЯ РАЗРАБОТКИ: тестовые токены
 			if initData == "test-vasya" {
 				tgID = 777111222
-				startParam = "7u72y9b6" // тестовый invite_link
+				// 🔥 ИСПРАВЛЕНО: берем startapp прямо из URL запроса!
+				startParam = r.URL.Query().Get("startapp")
+				if startParam == "" {
+					startParam = "test-default-link" 
+				}
 				log.Printf("🧪 Тестовая авторизация: vasya (tgID=%d, start_param=%s)", tgID, startParam)
+				
 			} else if initData == "test-master" {
 				tgID = 999999
 				startParam = "master"
 				log.Printf("🧪 Тестовая авторизация: master (tgID=%d)", tgID)
+				
 			} else {
-				// 🔥 НАСТОЯЩАЯ ВАЛИДАЦИЯ
+				// 🔥 НАСТОЯЩАЯ ВАЛИДАЦИЯ (в Telegram)
 				var err error
 				tgID, startParam, err = telegram.ValidateInitData(initData, tgBotToken)
 				if err != nil {
@@ -57,7 +64,6 @@ func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
 				log.Printf("✅ Реальная авторизация: tgID=%d, start_param=%s", tgID, startParam)
 			}
 
-			// 🔥 Кладем ОБА значения в контекст
 			ctx := context.WithValue(r.Context(), TgIDKey, tgID)
 			ctx = context.WithValue(ctx, StartParamKey, startParam)
 

@@ -9,11 +9,17 @@ if (window.Telegram?.WebApp) {
 
 // Получение initData
 function getInitData() {
+  // 🔥 ОТЛАДКА: смотрим, что видит фронтенд
+  console.log('🔍 Telegram объект:', window.Telegram)
+  console.log('🔍 WebApp объект:', window.Telegram?.WebApp)
+  console.log('🔍 initData:', window.Telegram?.WebApp?.initData)
+
   if (window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData !== '') {
+    console.log('✅ Используем реальный initData из Telegram')
     return window.Telegram.WebApp.initData
   }
   
-  // ТЕСТОВЫЙ РЕЖИМ
+  console.log('⚠️ initData пустой! Переключаемся в тестовый режим браузера')
   const urlParams = new URLSearchParams(window.location.search)
   const mode = urlParams.get('mode')
   const startapp = urlParams.get('startapp')
@@ -21,6 +27,7 @@ function getInitData() {
   if (mode === 'master' || startapp === 'master') {
     return 'test-master'
   }
+  
   return 'test-vasya'
 }
 
@@ -34,10 +41,14 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+
 api.interceptors.request.use((config) => {
-  if (!(config.data instanceof FormData)) {
+  if (config.data instanceof FormData) {
+    delete config.headers['Content-Type']
+  } else {
     config.headers['Content-Type'] = 'application/json'
   }
+  
   config.headers['X-Telegram-Init-Data'] = INIT_DATA
   config.headers['ngrok-skip-browser-warning'] = 'true'
   return config

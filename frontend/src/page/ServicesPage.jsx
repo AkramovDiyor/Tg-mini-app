@@ -16,9 +16,12 @@ export function ServicesPage({ inviteLink, onPick, onOpenDetails, bookingsVersio
 
   useEffect(() => {
     if (!inviteLink) {
+      console.error('invite_link is required to fetch services and master info')
       setLoading(false)
       return
     }
+
+    console.log('Fetching services and master info for invite link:', inviteLink)
 
     Promise.all([
       fetchServices(inviteLink).catch((err) => {
@@ -35,7 +38,10 @@ export function ServicesPage({ inviteLink, onPick, onOpenDetails, bookingsVersio
         setProfile(profileData)
         setLoading(false)
       })
-      .catch(() => setLoading(false))
+      .catch((err) => {
+        console.error('Error occurred while fetching services or master info:', err)
+        setLoading(false)
+      })
   }, [inviteLink])
 
   const masterName = profile?.name || 'Мастер'

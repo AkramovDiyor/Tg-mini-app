@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -147,33 +146,39 @@ func (m *MasterRepo) UpdateMasterProfile(ctx context.Context, masterID int64, na
 	return nil
 }
 
+
 // ========== UPDATE SETTINGS ==========
 func (m *MasterRepo) UpdateMasterSettings(ctx context.Context, masterID int64, workHours models.WorkHours, settings models.MasterSettings) error {
-	workHoursJSON, err := json.Marshal(workHours)
+	// 1. Маршалим структуры в []byte
+	workHoursBytes, err := json.Marshal(workHours)
 	if err != nil {
 		return fmt.Errorf("failed to marshal work_hours: %w", err)
 	}
 
-	settingsJSON, err := json.Marshal(settings)
+	settingsBytes, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("failed to marshal settings: %w", err)
 	}
 
+	// 2. 🔥 КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Преобразуем []byte в string.
+	// pgx отправит это как text, а PostgreSQL автоматически и безопасно 
+	// преобразует text в jsonb для колонок типа jsonb.
+	workHoursStr := string(workHoursBytes)
+	settingsStr := string(settingsBytes)
+
+	log.Printf("✅ Отправляем в БД (как string): work_hours=%s, settings=%s", workHoursStr, settingsStr)
+
+	// 3. Выполняем запрос БЕЗ явного каста ::jsonb
 	query := `
 		UPDATE masters 
-		SET work_hours = $1::jsonb, settings = $2::jsonb, updated_at = NOW()
+		SET work_hours = $1, settings = $2, updated_at = NOW()
 		WHERE id = $3
 	`
-	result, err := m.db.Exec(ctx, query, workHoursJSON, settingsJSON, masterID)
+	
+	_, err = m.db.Exec(ctx, query, workHoursStr, settingsStr, masterID)
 	if err != nil {
 		return fmt.Errorf("failed to update settings: %w", err)
 	}
 
-	rowsAffected := result.RowsAffected()
-	if rowsAffected == 0 {
-		return fmt.Errorf("master with id %d not found", masterID)
-	}
-
-	log.Printf("✅ Настройки обновлены для мастера %d", masterID)
 	return nil
 }

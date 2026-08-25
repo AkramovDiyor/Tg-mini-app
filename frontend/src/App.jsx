@@ -24,13 +24,46 @@ export default function App() {
   const showToast = useBookingStore((s) => s.showToast)
   const service = useBookingStore((s) => s.service)
 
+  // 🔥 Автоматическое определение роли через бэкенд (с умным fallback для браузера)
+    // 🔥 Автоматическое определение роли (с четким разделением тестов мастера и клиента)
   useEffect(() => {
     async function determineRole() {
       try {
+        const urlParams = new URLSearchParams(window.location.search)
+        const mode = urlParams.get('mode')
+        const urlStartapp = urlParams.get('startapp')
+
+        // 1️⃣ ЯВНЫЙ ТЕСТ МАСТЕРА В БРАУЗЕРЕ
+        if (!window.Telegram?.WebApp?.initData && mode === 'master') {
+          console.log('🌐 Тест в браузере: режим МАСТЕРА')
+          setIdentity({ 
+            role: 'master', 
+            master: { telegram_id: 999999, name: 'Тестовый Мастер' } 
+          })
+          setRole('master')
+          setLoading(false)
+          return // 🛑 Прерываем, не спрашиваем бэкенд
+        }
+
+        // 2️⃣ ЯВНЫЙ ТЕСТ КЛИЕНТА В БРАУЗЕРЕ (есть startapp, но это НЕ 'master')
+        if (!window.Telegram?.WebApp?.initData && urlStartapp && urlStartapp !== 'master') {
+          console.log('🌐 Тест в браузере: режим КЛИЕНТА, link:', urlStartapp)
+          setIdentity({ 
+            role: 'client', 
+            invite_link: urlStartapp,
+            user: { telegram_id: 777111222 }
+          })
+          setRole('client')
+          setLoading(false)
+          return // 🛑 Прерываем, не спрашиваем бэкенд
+        }
+
+        // 3️⃣ РЕАЛЬНЫЙ ЗАПРОС К БЭКЕНДУ (Telegram или непредвиденный случай)
+        console.log('🔄 Запрашиваем роль у бэкенда...')
         const me = await fetchUserIdentity()
         setIdentity(me)
         setRole(me.role)
-        console.log('🎯 Роль определена:', me.role)
+        console.log('🎯 Роль определена бэкендом:', me.role)
       } catch (err) {
         console.error('❌ Ошибка определения роли:', err)
         setError('Не удалось определить пользователя. Откройте приложение через Telegram.')
@@ -128,8 +161,14 @@ export default function App() {
     )
   }
 
-  // 🔥 Клиент — берем invite_link от бэкенда
-  const inviteLink = identity?.invite_link
+ // 🔥 Клиент — берем invite_link от бэкенда (или из URL, если бэкенд не дал)
+  let inviteLink = identity?.invite_link
+
+  // Дополнительная страховка
+  if (!inviteLink) {
+    const urlParams = new URLSearchParams(window.location.search)
+    inviteLink = urlParams.get('startapp')
+  }
 
   if (!inviteLink) {
     return (
