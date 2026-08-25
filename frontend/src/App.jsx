@@ -3,14 +3,14 @@ import { useBookingStore } from './store/bookingStore'
 import { ConfirmBookingSheet } from './components/sheets/ConfirmBookingSheet'
 import { BookingDetailsSheet } from './components/sheets/BookingDetailsSheet'
 import { Toast } from './components/ui/Toast'
-import { bookSlot, cancelBooking, fetchUserIdentity, getInviteLinkFromUrl } from './services/api'
+import { bookSlot, cancelBooking, fetchUserIdentity } from './services/api'
 import { ServicesPage } from './page/ServicesPage'
 import { BookingPage } from './page/BookingPage'
 import { MasterPage } from './page/MasterPage'
 
 export default function App() {
-  const [role, setRole] = useState(null) // 🔥 null = ещё не определили
-  const [identity, setIdentity] = useState(null) // 🔥 полные данные из /me
+  const [role, setRole] = useState(null)
+  const [identity, setIdentity] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [screen, setScreen] = useState('services')
@@ -24,7 +24,6 @@ export default function App() {
   const showToast = useBookingStore((s) => s.showToast)
   const service = useBookingStore((s) => s.service)
 
-  // 🔥 Автоматическое определение роли через бэкенд
   useEffect(() => {
     async function determineRole() {
       try {
@@ -34,7 +33,7 @@ export default function App() {
         console.log('🎯 Роль определена:', me.role)
       } catch (err) {
         console.error('❌ Ошибка определения роли:', err)
-        setError('Не удалось определить пользователя. Попробуйте перезапустить приложение.')
+        setError('Не удалось определить пользователя. Откройте приложение через Telegram.')
       } finally {
         setLoading(false)
       }
@@ -86,7 +85,6 @@ export default function App() {
     }
   }
 
-  // 🔥 Экран загрузки
   if (loading) {
     return (
       <div className="flex min-h-screen justify-center font-sans">
@@ -102,7 +100,6 @@ export default function App() {
     )
   }
 
-  // 🔥 Экран ошибки
   if (error) {
     return (
       <div className="flex min-h-screen justify-center font-sans">
@@ -112,12 +109,6 @@ export default function App() {
               <div className="mb-3 text-4xl">⚠️</div>
               <h2 className="mb-2 text-lg font-bold text-slate-800">Ошибка загрузки</h2>
               <p className="text-sm text-slate-500">{error}</p>
-              <button
-                onClick={() => window.location.reload()}
-                className="mt-4 rounded-xl bg-emerald-600 px-6 py-2.5 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition hover:bg-emerald-700"
-              >
-                Попробовать снова
-              </button>
             </div>
           </div>
         </div>
@@ -137,8 +128,8 @@ export default function App() {
     )
   }
 
-  // 🔥 Клиент — проверка invite_link
-  const inviteLink = getInviteLinkFromUrl()
+  // 🔥 Клиент — берем invite_link от бэкенда
+  const inviteLink = identity?.invite_link
 
   if (!inviteLink) {
     return (
@@ -168,12 +159,14 @@ export default function App() {
       <div className="relative min-h-screen w-full max-w-[420px] bg-[#F9FAFB] shadow-2xl">
         {screen === 'services' ? (
           <ServicesPage
+            inviteLink={inviteLink} // 🔥 Передаем от бэкенда
             onPick={() => setScreen('booking')}
             onOpenDetails={handleOpenDetails}
             bookingsVersion={bookingsVersion}
           />
         ) : (
           <BookingPage
+            inviteLink={inviteLink} // 🔥 Передаем от бэкенда
             onBack={() => setScreen('services')}
             onSlotClick={(startTime, iso) => setSheetSlot({ startTime, iso })}
           />

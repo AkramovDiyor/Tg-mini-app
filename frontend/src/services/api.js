@@ -1,69 +1,31 @@
 import axios from 'axios'
 
-// ============================================
-// 🤖 ИНИЦИАЛИЗАЦИЯ TELEGRAM WEBAPP
-// ============================================
+// Инициализация Telegram WebApp
 if (window.Telegram?.WebApp) {
   window.Telegram.WebApp.ready()
   window.Telegram.WebApp.expand()
   window.Telegram.WebApp.enableClosingConfirmation()
 }
 
-// ============================================
-// 🕵️ ПОЛУЧЕНИЕ initData
-// ============================================
+// Получение initData
 function getInitData() {
-  // 1. Настоящий Telegram WebApp
   if (window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData !== '') {
     return window.Telegram.WebApp.initData
   }
   
-  // 2. ТЕСТОВЫЙ РЕЖИМ В БРАУЗЕРЕ
+  // ТЕСТОВЫЙ РЕЖИМ
   const urlParams = new URLSearchParams(window.location.search)
-  const startParam = urlParams.get('startapp') || ''
-  const mode = urlParams.get('mode') || ''
+  const mode = urlParams.get('mode')
+  const startapp = urlParams.get('startapp')
   
-  // Явно указан режим мастера
-  if (mode === 'master' || startParam === 'master') {
-    console.log('🧪 Тестовый режим: МАСТЕР')
+  if (mode === 'master' || startapp === 'master') {
     return 'test-master'
   }
-  
-  // Есть invite_link → клиент
-  if (startParam && startParam !== 'client') {
-    console.log('🧪 Тестовый режим: КЛИЕНТ (invite_link)')
-    return 'test-vasya'
-  }
-  
-  // По умолчанию — мастер (разработчик)
-  console.log('🧪 Тестовый режим: МАСТЕР (по умолчанию)')
-  return 'test-master'
-}
-
-/**
- * Получить invite_link из URL (для клиентов)
- */
-export function getInviteLinkFromUrl() {
-  const urlParams = new URLSearchParams(window.location.search)
-  const startParam = urlParams.get('startapp') || ''
-  const mode = urlParams.get('mode') || ''
-  
-  // Если mode=master — это не invite_link
-  if (mode === 'master') return null
-  
-  // Если startParam не служебное — это invite_link
-  if (startParam && startParam !== 'master' && startParam !== 'client') {
-    return startParam
-  }
-  
-  return null
+  return 'test-vasya'
 }
 
 const INIT_DATA = getInitData()
 
-// ============================================
-// ⚙️ КОНФИГУРАЦИЯ AXIOS
-// ============================================
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api/v1'
 export const STATIC_BASE_URL = import.meta.env.VITE_STATIC_BASE || 'http://localhost:8080'
 
@@ -91,10 +53,7 @@ api.interceptors.response.use(
   }
 )
 
-// ============================================
 // 🔥 ОПРЕДЕЛЕНИЕ РОЛИ ЧЕРЕЗ БЭКЕНД
-// ============================================
-
 let cachedIdentity = null
 
 export async function fetchUserIdentity() {
@@ -107,7 +66,7 @@ export async function fetchUserIdentity() {
     return data
   } catch (error) {
     console.error('❌ Не удалось определить роль:', error)
-    return { role: 'client', user: { telegram_id: 0 } }
+    throw error
   }
 }
 
@@ -115,39 +74,28 @@ export function getUserIdentity() {
   return cachedIdentity
 }
 
-export function isMaster() {
-  return cachedIdentity?.role === 'master'
-}
-
-// ============================================
 // 🔓 ПУБЛИЧНЫЕ КЛИЕНТСКИЕ ЭНДПОИНТЫ
-// ============================================
 export async function fetchServices(inviteLink) {
-  const link = inviteLink || getInviteLinkFromUrl()
-  if (!link) throw new Error('invite_link не найден')
-  const { data } = await api.get(`/invite/${link}/services`)
+  if (!inviteLink) throw new Error('invite_link required')
+  const { data } = await api.get(`/invite/${inviteLink}/services`)
   return data
 }
 
 export async function fetchSlots(date, serviceId, inviteLink) {
-  const link = inviteLink || getInviteLinkFromUrl()
-  if (!link) throw new Error('invite_link не найден')
-  const { data } = await api.get(`/invite/${link}/slots`, {
+  if (!inviteLink) throw new Error('invite_link required')
+  const { data } = await api.get(`/invite/${inviteLink}/slots`, {
     params: { date, service_id: serviceId },
   })
   return data
 }
 
 export async function fetchMasterInfo(inviteLink) {
-  const link = inviteLink || getInviteLinkFromUrl()
-  if (!link) throw new Error('invite_link не найден')
-  const { data } = await api.get(`/invite/${link}/info`)
+  if (!inviteLink) throw new Error('invite_link required')
+  const { data } = await api.get(`/invite/${inviteLink}/info`)
   return data
 }
 
-// ============================================
 // 🔐 ЗАЩИЩЁННЫЕ КЛИЕНТСКИЕ ЭНДПОИНТЫ
-// ============================================
 export async function bookSlot(params) {
   const { data } = await api.post('/book', params)
   return data
@@ -163,9 +111,7 @@ export async function cancelBooking(bookingId) {
   return data
 }
 
-// ============================================
 // 🔐 МАСТЕРСКИЕ ЭНДПОИНТЫ
-// ============================================
 export async function fetchTodaySchedule() {
   const { data } = await api.get('/master/today')
   return data
@@ -211,9 +157,7 @@ export async function updateSettings(settingsData) {
   return data
 }
 
-// ============================================
 // 📸 ФОТО
-// ============================================
 export function normalizePhotoUrl(url) {
   if (!url) return ''
   if (url.startsWith('http')) return url
@@ -237,9 +181,7 @@ export async function deletePhoto(photoId) {
   return data
 }
 
-// ============================================
 // 🎨 TELEGRAM ФИЧИ
-// ============================================
 export function showTelegramPopup(message) {
   if (window.Telegram?.WebApp) window.Telegram.WebApp.showAlert(message)
   else alert(message)

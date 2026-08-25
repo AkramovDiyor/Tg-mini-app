@@ -17,14 +17,15 @@ func NewMeHandler(masterRepo repositories.MasterRepository) *MeHandler {
 
 // GetMe определяет, кто текущий пользователь: мастер или клиент
 func (h *MeHandler) GetMe(w http.ResponseWriter, r *http.Request) {
-	// 1. Достаем tgID из контекста (уже валидирован через AuthMiddleware)
+	// 1. Достаем tgID и start_param из контекста
 	tgID, err := GetIDFromContext(r.Context())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return
 	}
 
-	log.Printf("🔍 Определяем роль для tgID=%d", tgID)
+	startParam := GetStartParamFromContext(r.Context())
+	log.Printf("🔍 Определяем роль для tgID=%d, start_param=%s", tgID, startParam)
 
 	// 2. Проверяем, есть ли такой мастер
 	isMaster, err := h.masterRepo.ExistsByTelegramID(r.Context(), tgID)
@@ -37,7 +38,7 @@ func (h *MeHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	var response map[string]interface{}
 
 	if isMaster {
-		// 3a. Пользователь — мастер, достаем полные данные
+		// 3a. Пользователь — мастер
 		master, err := h.masterRepo.GetMasterByTelegramID(r.Context(), tgID)
 		if err != nil {
 			log.Printf("❌ Не удалось получить мастера: %v", err)
@@ -52,13 +53,15 @@ func (h *MeHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 		log.Printf("✅ Определен МАСТЕР: %s (invite_link=%s)", master.Name, master.InviteLink)
 	} else {
 		// 3b. Пользователь — клиент
+		// 🔥 Возвращаем invite_link из start_param
 		response = map[string]interface{}{
 			"role": "client",
 			"user": map[string]interface{}{
 				"telegram_id": tgID,
 			},
+			"invite_link": startParam, // 🔥 КЛЮЧЕВОЕ: клиент узнает, к какому мастеру пришел
 		}
-		log.Printf("✅ Определен КЛИЕНТ: tgID=%d", tgID)
+		log.Printf("✅ Определен КЛИЕНТ: tgID=%d, invite_link=%s", tgID, startParam)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

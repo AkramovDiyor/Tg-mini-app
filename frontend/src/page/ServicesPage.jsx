@@ -6,7 +6,7 @@ import { useBookingStore } from '../store/bookingStore'
 import { useDragScroll } from '../lib/useDragScroll'
 import { fetchServices, fetchMasterInfo, normalizePhotoUrl } from '../services/api'
 
-export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
+export function ServicesPage({ inviteLink, onPick, onOpenDetails, bookingsVersion }) {
   const pickService = useBookingStore((s) => s.pickService)
   const galleryRef = useDragScroll()
 
@@ -15,13 +15,17 @@ export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    // Параллельно грузим услуги и публичную информацию о мастере
+    if (!inviteLink) {
+      setLoading(false)
+      return
+    }
+
     Promise.all([
-      fetchServices().catch((err) => {
+      fetchServices(inviteLink).catch((err) => {
         console.error('Failed to load services:', err)
         return []
       }),
-      fetchMasterInfo().catch((err) => {
+      fetchMasterInfo(inviteLink).catch((err) => {
         console.error('Failed to load master info:', err)
         return null
       }),
@@ -32,14 +36,11 @@ export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [])
+  }, [inviteLink])
 
-  // Фолбэк-имя и bio, если API не вернул данные
   const masterName = profile?.name || 'Мастер'
   const masterBio = profile?.bio || 'Барбер'
   const masterRating = profile?.rating || null
-
-  // Фото работ из API
   const photos = profile?.photos || []
 
   return (
@@ -56,12 +57,8 @@ export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
             <span className="absolute bottom-1 right-1 h-4 w-4 rounded-full border-[3px] border-slate-900 bg-emerald-400" />
           </div>
 
-          {/* Имя мастера из API */}
-          <h1 className="mt-4 text-2xl font-bold text-white">
-            {masterName}
-          </h1>
+          <h1 className="mt-4 text-2xl font-bold text-white">{masterName}</h1>
 
-          {/* Рейтинг + специализация из API */}
           <span className="mt-2.5 flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-medium text-white backdrop-blur">
             {masterRating ? (
               <>
@@ -87,7 +84,6 @@ export function ServicesPage({ onPick, onOpenDetails, bookingsVersion }) {
           className="thin-scrollbar mt-3 flex cursor-grab snap-x snap-mandatory select-none gap-3 scroll-pl-5 overflow-x-auto px-5 pb-2 active:cursor-grabbing"
         >
           {photos.length === 0 ? (
-            // Заглушка, если у мастера пока нет фото
             <div className="flex h-32 w-40 shrink-0 snap-start flex-col items-center justify-center gap-2 rounded-2xl bg-gradient-to-br from-slate-200 to-slate-300">
               <Image className="h-8 w-8 text-slate-400/70" strokeWidth={1.5} />
               <span className="text-[11px] font-medium text-slate-400">Фото скоро появятся</span>

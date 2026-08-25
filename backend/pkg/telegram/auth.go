@@ -19,15 +19,16 @@ type WebAppUser struct {
 	Username  string `json:"username"`
 }
 
-func ValidateInitData(initDate string, botToken string) (int64, error)  {
-	params, err := url.ParseQuery(initDate)
+// ValidateInitData возвращает (tgID, startParam, error)
+func ValidateInitData(initData string, botToken string) (int64, string, error) {
+	params, err := url.ParseQuery(initData)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	hash := params.Get("hash")
 	if hash == "" {
-		return 0, errors.New("hash не найден в initData")
+		return 0, "", errors.New("hash не найден в initData")
 	}
 	params.Del("hash")
 
@@ -37,36 +38,37 @@ func ValidateInitData(initDate string, botToken string) (int64, error)  {
 	}
 	sort.Strings(keys)
 
-	var dateCheckStrings []string
+	var dataCheckStrings []string
 	for _, k := range keys {
-		dateCheckStrings = append(dateCheckStrings, fmt.Sprintf("%s=%s", k, params.Get(k)))
+		dataCheckStrings = append(dataCheckStrings, fmt.Sprintf("%s=%s", k, params.Get(k)))
 	}
-	dateCheckString := strings.Join(dateCheckStrings, "\n")
+	dataCheckString := strings.Join(dataCheckStrings, "\n")
 
 	secretKey := hmac.New(sha256.New, []byte("WebAppData"))
 	secretKey.Write([]byte(botToken))
 	secretKeyBytes := secretKey.Sum(nil)
 
 	h := hmac.New(sha256.New, secretKeyBytes)
-	h.Write([]byte(dateCheckString))
+	h.Write([]byte(dataCheckString))
 	calculatedHash := hex.EncodeToString(h.Sum(nil))
 
-
 	if calculatedHash != hash {
-		return 0, errors.New("невалидная подпись initData (данные поддельные)")
+		return 0, "", errors.New("невалидная подпись initData")
 	}
 
 	var user WebAppUser
 	userJSON := params.Get("user")
 	if userJSON == "" {
-        return 0, errors.New("user не найден в initData")
-    }
+		return 0, "", errors.New("user не найден в initData")
+	}
 
-    err = json.Unmarshal([]byte(userJSON), &user)
-    if err != nil {
-        return 0, err
-    }
+	err = json.Unmarshal([]byte(userJSON), &user)
+	if err != nil {
+		return 0, "", err
+	}
 
-    return user.ID, nil
+	// 🔥 ДОСТАЕМ start_param (invite_link для клиента)
+	startParam := params.Get("start_param")
 
+	return user.ID, startParam, nil
 }
