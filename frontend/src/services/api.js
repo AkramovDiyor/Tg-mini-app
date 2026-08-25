@@ -3,163 +3,151 @@ import axios from 'axios'
 // ============================================
 // 🤖 ИНИЦИАЛИЗАЦИЯ TELEGRAM WEBAPP
 // ============================================
-// Говорим Telegram, что WebApp готов к работе
 if (window.Telegram?.WebApp) {
   window.Telegram.WebApp.ready()
-  // Опционально: расширяем на весь экран
   window.Telegram.WebApp.expand()
-  // Включаем вертикальные свайпы для закрытия
   window.Telegram.WebApp.enableClosingConfirmation()
 }
 
 // ============================================
-// 🕵️ ЛОГИКА ОПРЕДЕЛЕНИЯ РОЛИ
+// 🕵️ ПОЛУЧЕНИЕ initData
 // ============================================
-
-/**
- * Достает start_param из Telegram WebApp или URL
- * - 'master' → панель мастера
- * - 'abc123xy' (invite_link) → клиентская часть мастера
- */
-function getStartParam() {
-  // 1. Пытаемся достать из реального Telegram WebApp
-  if (window.Telegram?.WebApp?.initDataUnsafe?.start_param) {
-    return window.Telegram.WebApp.initDataUnsafe.start_param
-  }
-  
-  // 2. Fallback: читаем из URL (для тестов в браузере)
-  const urlParams = new URLSearchParams(window.location.search)
-  return urlParams.get('startapp') || ''
-}
-
-/**
- * Возвращает initData для авторизации
- * - В реальном Telegram: криптографическая подпись от Telegram
- * - В браузере: тестовые токены ('test-master' или 'test-vasya')
- */
 function getInitData() {
-  // 1. Если мы в настоящем Telegram — используем реальную подпись
+  // 1. Настоящий Telegram WebApp
   if (window.Telegram?.WebApp?.initData && window.Telegram.WebApp.initData !== '') {
     return window.Telegram.WebApp.initData
   }
   
   // 2. ТЕСТОВЫЙ РЕЖИМ В БРАУЗЕРЕ
-  const startParam = getStartParam()
+  const urlParams = new URLSearchParams(window.location.search)
+  const startParam = urlParams.get('startapp') || ''
+  const mode = urlParams.get('mode') || ''
   
-  if (startParam === 'master') {
-    // Мастерская панель → тестовый мастер (ID: 999999)
+  // Явно указан режим мастера
+  if (mode === 'master' || startParam === 'master') {
+    console.log('🧪 Тестовый режим: МАСТЕР')
     return 'test-master'
   }
   
-  // Клиентская часть → тестовый клиент (ID: 777111222)
-  return 'test-vasya'
-}
-
-/**
- * Определяет, кто мы: мастер или клиент
- */
-export function getUserRole() {
-  const startParam = getStartParam()
-  return startParam === 'master' ? 'master' : 'client'
-}
-
-/**
- * Возвращает invite_link текущего мастера (для клиента)
- */
-export function getInviteLink() {
-  const startParam = getStartParam()
-  
-  // Если мы мастер — invite_link не нужен
-  if (startParam === 'master' || startParam === '') {
-    return null
+  // Есть invite_link → клиент
+  if (startParam && startParam !== 'client') {
+    console.log('🧪 Тестовый режим: КЛИЕНТ (invite_link)')
+    return 'test-vasya'
   }
   
-  // Иначе startParam — это invite_link мастера
-  return startParam
+  // По умолчанию — мастер (разработчик)
+  console.log('🧪 Тестовый режим: МАСТЕР (по умолчанию)')
+  return 'test-master'
 }
+
+/**
+ * Получить invite_link из URL (для клиентов)
+ */
+export function getInviteLinkFromUrl() {
+  const urlParams = new URLSearchParams(window.location.search)
+  const startParam = urlParams.get('startapp') || ''
+  const mode = urlParams.get('mode') || ''
+  
+  // Если mode=master — это не invite_link
+  if (mode === 'master') return null
+  
+  // Если startParam не служебное — это invite_link
+  if (startParam && startParam !== 'master' && startParam !== 'client') {
+    return startParam
+  }
+  
+  return null
+}
+
+const INIT_DATA = getInitData()
 
 // ============================================
 // ⚙️ КОНФИГУРАЦИЯ AXIOS
 // ============================================
-
-const API_BASE = 'http://localhost:8080/api/v1'
-const INIT_DATA = getInitData()
-
-console.log('🎯 Режим работы:', window.Telegram?.WebApp ? 'Telegram WebApp' : 'Браузер (тест)')
-console.log('👤 Роль:', getUserRole())
-console.log('🔗 Invite link:', getInviteLink() || '(не нужен)')
-console.log('🔐 InitData (первые 50 символов):', INIT_DATA.substring(0, 50) + '...')
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api/v1'
+export const STATIC_BASE_URL = import.meta.env.VITE_STATIC_BASE || 'http://localhost:8080'
 
 const api = axios.create({
   baseURL: API_BASE,
-  headers: {
-    'Content-Type': 'application/json',
-  },
+  headers: { 'Content-Type': 'application/json' },
 })
 
-// 🔥 INTERCEPTOR: автоматически добавляет X-Telegram-Init-Data ко ВСЕМ запросам
 api.interceptors.request.use((config) => {
-  // Для multipart/form-data НЕ устанавливаем Content-Type — axios сделает это сам
   if (!(config.data instanceof FormData)) {
     config.headers['Content-Type'] = 'application/json'
   }
-  
   config.headers['X-Telegram-Init-Data'] = INIT_DATA
+  config.headers['ngrok-skip-browser-warning'] = 'true'
   return config
 })
 
-// 🔥 INTERCEPTOR: обработка ошибок авторизации
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      console.error('❌ Ошибка авторизации. Возможно, initData невалиден.')
-      // Можно показать alert или редирект
+      console.error('❌ Ошибка авторизации')
     }
     return Promise.reject(error)
   }
 )
 
 // ============================================
-// 🔓 ПУБЛИЧНЫЕ КЛИЕНТСКИЕ ЭНДПОИНТЫ
+// 🔥 ОПРЕДЕЛЕНИЕ РОЛИ ЧЕРЕЗ БЭКЕНД
 // ============================================
 
-export async function fetchServices() {
-  const inviteLink = getInviteLink()
-  if (!inviteLink) {
-    throw new Error('invite_link не найден. Откройте Mini App по ссылке мастера.')
+let cachedIdentity = null
+
+export async function fetchUserIdentity() {
+  if (cachedIdentity) return cachedIdentity
+  
+  try {
+    const { data } = await api.get('/me')
+    cachedIdentity = data
+    console.log('🎯 Роль определена:', data.role, data)
+    return data
+  } catch (error) {
+    console.error('❌ Не удалось определить роль:', error)
+    return { role: 'client', user: { telegram_id: 0 } }
   }
-  const { data } = await api.get(`/invite/${inviteLink}/services`)
+}
+
+export function getUserIdentity() {
+  return cachedIdentity
+}
+
+export function isMaster() {
+  return cachedIdentity?.role === 'master'
+}
+
+// ============================================
+// 🔓 ПУБЛИЧНЫЕ КЛИЕНТСКИЕ ЭНДПОИНТЫ
+// ============================================
+export async function fetchServices(inviteLink) {
+  const link = inviteLink || getInviteLinkFromUrl()
+  if (!link) throw new Error('invite_link не найден')
+  const { data } = await api.get(`/invite/${link}/services`)
   return data
 }
 
-export async function fetchSlots(date, serviceId) {
-  const inviteLink = getInviteLink()
-  if (!inviteLink) {
-    throw new Error('invite_link не найден.')
-  }
-  const { data } = await api.get(`/invite/${inviteLink}/slots`, {
+export async function fetchSlots(date, serviceId, inviteLink) {
+  const link = inviteLink || getInviteLinkFromUrl()
+  if (!link) throw new Error('invite_link не найден')
+  const { data } = await api.get(`/invite/${link}/slots`, {
     params: { date, service_id: serviceId },
   })
   return data
 }
 
-/**
- * Получает агрегированную инфу о мастере (с фото)
- */
-export async function fetchMasterInfo() {
-  const inviteLink = getInviteLink()
-  if (!inviteLink) {
-    throw new Error('invite_link не найден.')
-  }
-  const { data } = await api.get(`/invite/${inviteLink}/info`)
+export async function fetchMasterInfo(inviteLink) {
+  const link = inviteLink || getInviteLinkFromUrl()
+  if (!link) throw new Error('invite_link не найден')
+  const { data } = await api.get(`/invite/${link}/info`)
   return data
 }
 
 // ============================================
 // 🔐 ЗАЩИЩЁННЫЕ КЛИЕНТСКИЕ ЭНДПОИНТЫ
 // ============================================
-
 export async function bookSlot(params) {
   const { data } = await api.post('/book', params)
   return data
@@ -178,7 +166,6 @@ export async function cancelBooking(bookingId) {
 // ============================================
 // 🔐 МАСТЕРСКИЕ ЭНДПОИНТЫ
 // ============================================
-
 export async function fetchTodaySchedule() {
   const { data } = await api.get('/master/today')
   return data
@@ -225,14 +212,8 @@ export async function updateSettings(settingsData) {
 }
 
 // ============================================
-// 📸 ФОТО РАБОТ МАСТЕРА
+// 📸 ФОТО
 // ============================================
-
-export const STATIC_BASE_URL = 'http://localhost:8080'
-
-/**
- * Превращает относительный URL фото в абсолютный
- */
 export function normalizePhotoUrl(url) {
   if (!url) return ''
   if (url.startsWith('http')) return url
@@ -246,11 +227,8 @@ export async function fetchPhotos() {
 
 export async function uploadPhoto(file) {
   const formData = new FormData()
-  formData.append('file', file) // Имя поля 'file' — как в Go (r.FormFile("file"))
-  
-  const { data } = await api.post('/master/photos', formData, {
-    // ⚠️ Content-Type НЕ устанавливаем вручную — axios сам поставит multipart/form-data с boundary
-  })
+  formData.append('file', file)
+  const { data } = await api.post('/master/photos', formData)
   return data
 }
 
@@ -260,49 +238,17 @@ export async function deletePhoto(photoId) {
 }
 
 // ============================================
-// 🎨 ТЕЛЕГРАМ-СПЕЦИФИЧНЫЕ ФИЧИ
+// 🎨 TELEGRAM ФИЧИ
 // ============================================
-
-/**
- * Показывает нативный popup Telegram
- */
 export function showTelegramPopup(message) {
-  if (window.Telegram?.WebApp) {
-    window.Telegram.WebApp.showAlert(message)
-  } else {
-    alert(message)
-  }
+  if (window.Telegram?.WebApp) window.Telegram.WebApp.showAlert(message)
+  else alert(message)
 }
 
-/**
- * Показывает нативный confirm Telegram
- */
-export function showTelegramConfirm(message, callback) {
-  if (window.Telegram?.WebApp) {
-    window.Telegram.WebApp.showConfirm(message, callback)
-  } else {
-    callback(confirm(message))
-  }
-}
-
-/**
- * Haptic feedback (вибрация)
- */
 export function hapticFeedback(type = 'light') {
   if (window.Telegram?.WebApp?.HapticFeedback) {
     window.Telegram.WebApp.HapticFeedback.impactOccurred(type)
   }
 }
 
-/**
- * Закрыть Mini App
- */
-export function closeWebApp() {
-  if (window.Telegram?.WebApp) {
-    window.Telegram.WebApp.close()
-  }
-}
-
-// Экспортируем сам WebApp для прямого доступа
 export const TelegramWebApp = window.Telegram?.WebApp || null
-// ngrok http http://127.0.0.1:5173

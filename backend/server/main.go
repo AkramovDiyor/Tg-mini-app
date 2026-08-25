@@ -46,6 +46,7 @@ func main() {
 	waitlistRepo := repositories.NewWaitlistRepo(pool)
 	clientRepo := repositories.NewClientRepo(pool)
 	photoRepo := repositories.NewPhotoRepo(pool)
+	meHandler := httpapi.NewMeHandler(masterRepo) 
 
 	// 5. Инициализируем сервисы
 	masterService := service.NewMasterService(masterRepo)
@@ -83,7 +84,7 @@ func main() {
 	photoHandler := httpapi.NewPhotoHandler(photoRepo, masterRepo)
 
 	// 7. Создаем HTTP-роутер
-	router := httpapi.NewRouter(bookingHandler, masterHandler, photoHandler, cfg.TgBotToken)
+	router := httpapi.NewRouter(bookingHandler, masterHandler, photoHandler, meHandler, cfg.TgBotToken)
 
 	// ============================================
 	// 🔥 8. ЗАПУСК TELEGRAM-БОТА В ГОРУТИНЕ
@@ -95,7 +96,7 @@ func main() {
 	// 9. ЗАПУСК HTTP-СЕРВЕРА
 	// ============================================
 	httpServer := &http.Server{
-		Addr:    ":8080",
+		Addr:    "0.0.0.0:8080",
 		Handler: router,
 	}
 

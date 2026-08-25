@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -13,33 +14,53 @@ func NewRouter(
 	bookingHandler *BookingHandler,
 	masterHandler *MasterHandler,
 	photoHandler *PhotoHandler,
+	meHandler *MeHandler,
 	tgBotToken string,
 ) *chi.Mux {
 	r := chi.NewRouter()
 
 	corsHandler := cors.New(cors.Options{
-		AllowedOrigins: []string{
-			"http://localhost:5173",
-			"http://127.0.0.1:5173",
-			"http://10.21.33.135",
-			"https://tg-mini-app-pink.vercel.app",
+		// 🔥 Разрешаем ЛЮБЫЕ домены через функцию
+		AllowOriginRequestFunc: func(r *http.Request, origin string) bool {
+			// Локальные домены
+			if strings.HasPrefix(origin, "http://localhost:") ||
+				strings.HasPrefix(origin, "https://localhost:") ||
+				strings.HasPrefix(origin, "http://127.0.0.1:") ||
+				strings.HasPrefix(origin, "http://192.168.") ||
+				strings.HasPrefix(origin, "https://192.168.") {
+				return true
+			}
+			// 🎯 КЛЮЧЕВОЕ: разрешаем ВСЕ ngrok, vercel, loca.lt
+			if strings.HasSuffix(origin, ".ngrok-free.app") ||
+				strings.HasSuffix(origin, ".ngrok.io") ||
+				strings.HasSuffix(origin, ".vercel.app") ||
+				strings.HasSuffix(origin, ".loca.lt") ||
+				strings.HasSuffix(origin, ".trycloudflare.com") {
+				return true
+			}
+			return false
 		},
 		AllowedMethods: []string{
-			http.MethodGet,
-			http.MethodPost,
-			http.MethodPut,
-			http.MethodDelete,
-			http.MethodOptions,
+			"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH",
 		},
 		AllowedHeaders: []string{
-			"Origin",
 			"Accept",
+			"Authorization",
 			"Content-Type",
+			"X-CSRF-Token",
 			"X-Requested-With",
 			"X-Telegram-Init-Data",
+			"ngrok-skip-browser-warning",
+			"Bypass-Tunnel-Reminder",
+			"Cache-Control",
+		},
+		ExposedHeaders: []string{
+			"Content-Length",
+			"Content-Type",
 		},
 		AllowCredentials: true,
-		Debug:            false,
+		MaxAge:           300,
+		Debug:            true, // 🔥 Включено для отладки
 	})
 
 	r.Use(corsHandler.Handler)
@@ -61,6 +82,11 @@ func NewRouter(
 		v1.Get("/invite/{invite_link}/services", bookingHandler.GetServices)
 		v1.Get("/invite/{invite_link}/slots", bookingHandler.GetSlots)
 		v1.Get("/invite/{invite_link}/info", bookingHandler.GetInfoMaster)
+
+		    v1.Group(func(auth chi.Router) {
+        auth.Use(AuthMiddleware(tgBotToken))
+        auth.Get("/me", meHandler.GetMe)
+    })
 
 		// ============================================
 		// 🔐 ЗАЩИЩЕННЫЕ МАРШРУТЫ КЛИЕНТА
