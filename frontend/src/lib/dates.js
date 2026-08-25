@@ -137,7 +137,6 @@ export function formatTimeFromISO(isoString) {
 export function getBookingTimeLabelFromISO(isoString, now = new Date()) {
   if (!isoString) return ''
   
-  // new Date(isoString) уже дает нам локальный timestamp
   const targetTime = new Date(isoString).getTime()
   const nowTime = now.getTime()
   const diff = targetTime - nowTime
@@ -147,19 +146,37 @@ export function getBookingTimeLabelFromISO(isoString, now = new Date()) {
   const HOUR = 3600000
   const timeStr = formatTimeFromISO(isoString)
   
-  // Больше 24 часов: "Запись 20 авг, 11:00"
-  if (diff > 24 * HOUR) {
-    const targetDate = new Date(isoString)
-    return `Запись ${targetDate.getDate()} ${MONTHS_SHORT[targetDate.getMonth()]}, ${timeStr}`
+  const targetDate = new Date(isoString)
+  
+  // Проверяем, действительно ли это СЕГОДНЯ по локальной дате
+  const isToday = targetDate.getDate() === now.getDate() &&
+                  targetDate.getMonth() === now.getMonth() &&
+                  targetDate.getFullYear() === now.getFullYear()
+  
+  // Проверяем, действительно ли это ЗАВТРА
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const isTomorrow = targetDate.getDate() === tomorrow.getDate() &&
+                     targetDate.getMonth() === tomorrow.getMonth() &&
+                     targetDate.getFullYear() === tomorrow.getFullYear()
+  
+  // Меньше 3 часов: обратный отсчёт
+  if (diff <= 3 * HOUR) {
+    const h = Math.floor(diff / HOUR)
+    const m = Math.floor((diff % HOUR) / 60000)
+    return h > 0 ? `Через ${h} ч ${m} мин` : `Через ${m} мин`
   }
   
-  // 3-24 часа: "Сегодня, 11:00"
-  if (diff > 3 * HOUR) {
+  // Сегодня: "Сегодня, 11:00"
+  if (isToday) {
     return `Сегодня, ${timeStr}`
   }
   
-  // Меньше 3 часов: обратный отсчёт
-  const h = Math.floor(diff / HOUR)
-  const m = Math.floor((diff % HOUR) / 60000)
-  return h > 0 ? `Через ${h} ч ${m} мин` : `Через ${m} мин`
+  // Завтра: "Завтра, 11:00"
+  if (isTomorrow) {
+    return `Завтра, ${timeStr}`
+  }
+  
+  // Другой день: "Запись 25 авг, 11:00"
+  return `Запись ${targetDate.getDate()} ${MONTHS_SHORT[targetDate.getMonth()]}, ${timeStr}`
 }

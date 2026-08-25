@@ -1,41 +1,40 @@
 package database
 
 import (
-	"context"
-	"fmt"
-	"time"
+    "context"
+    "fmt"
+    "time"
 
-	"backend/internal/config" // Внимание: убедитесь, что имя модуля в go.mod совпадает с 'backend'
+    "backend/internal/config"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+    "github.com/jackc/pgx/v5" 
+    "github.com/jackc/pgx/v5/pgxpool"
 )
 
-// NewPostgres инициализирует пул соединений с базой данных PostgreSQL
 func NewPostgres(cfg config.Config) (*pgxpool.Pool, error) {
-	// Сборка DSN строки подключения
-	// dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
-	// 	cfg.DBUser,
-	// 	cfg.DBPassword,
-	// 	cfg.DBHost,
-	// 	cfg.DBPort,
-	// 	cfg.DBName,
-	// )
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
 
-	// Создаем контекст с таймаутом на случай, если база "лежит" и долго не отвечает
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+    // 1. Парсим конфиг из строки подключения
+    pgxConfig, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+    if err != nil {
+        return nil, fmt.Errorf("не удалось распарсить DATABASE_URL: %w", err)
+    }
 
-	// Инициализируем пул соединений (соединение ленивое, физически база еще не проверяется)
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
-	if err != nil {
-		return nil, fmt.Errorf("не удалось создать конфигурацию пула Postgres: %w", err)
-	}
+    // 2. ОТКЛЮЧАЕМ КЭШ ПОДГОТОВЛЕННЫХ ЗАПРОСОВ (ФИКС ОШИБКИ SUPABASE)
+    pgxConfig.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 
-	// Делаем обязательный Ping, чтобы физически проверить доступность СУБД
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close() // Закрываем пул, если подключиться не удалось
-		return nil, fmt.Errorf("ошибка проверки связи (Ping) с PostgreSQL: %w", err)
-	}
+    // 3. Создаем пул с обновленным конфигом
+    pool, err := pgxpool.NewWithConfig(ctx, pgxConfig)
+    if err != nil {
+        return nil, fmt.Errorf("не удалось создать конфигурацию пула Postgres: %w", err)
+    }
 
-	return pool, nil
+    // Делаем обязательный Ping
+    if err := pool.Ping(ctx); err != nil {
+        pool.Close()
+        return nil, fmt.Errorf("ошибка проверки связи (Ping) с PostgreSQL: %w", err)
+    }
+
+    return pool, nil
 }

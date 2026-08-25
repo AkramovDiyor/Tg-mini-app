@@ -7,7 +7,6 @@ import { rub } from '../../lib/currency'
 export function BookingDetailsSheet({ booking, onClose, onCancel }) {
   const [now, setNow] = useState(() => new Date())
 
-  // Обновляем таймер каждую минуту для обратного отсчёта
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 60000)
     return () => clearInterval(t)
@@ -15,12 +14,11 @@ export function BookingDetailsSheet({ booking, onClose, onCancel }) {
 
   if (!booking) return null
 
-  // Парсим дату из строки
-  // Просто парсим ISO строку, браузер сам даст локальную дату
-  const bookingDate = new Date(booking.start_time)
-  const weekday = WEEKDAYS_SHORT[bookingDate.getDay()] // getDay() без UTC
-  const day = bookingDate.getDate()
-  const month = bookingDate.getMonth() + 1
+  // Парсим дату напрямую из строки (не зависит от часового пояса)
+  const datePart = booking.start_time.split('T')[0]
+  const [year, month, day] = datePart.split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  const weekday = WEEKDAYS_SHORT[date.getUTCDay()]
   const fullDate = `${weekday}, ${day} ${MONTHS_GEN[month - 1]}`
 
   // Умный таймер
@@ -28,27 +26,22 @@ export function BookingDetailsSheet({ booking, onClose, onCancel }) {
   
   return (
     <SheetShell onClose={onClose}>
-      {/* Заголовок */}
       <p className="text-center text-[11px] font-bold uppercase tracking-widest text-slate-400">
         Моя запись
       </p>
 
-      {/* Услуга */}
       <h3 className="mt-3 text-center text-2xl font-extrabold leading-snug text-slate-900">
         {booking.service_name}
       </h3>
 
-      {/* Дата */}
       <p className="mt-1 text-center text-sm capitalize text-slate-400">
         {fullDate}
       </p>
 
-      {/* Умный таймер */}
       <p className="mt-1 text-center text-2xl font-extrabold leading-snug text-emerald-600">
         {timeLabel}
       </p>
 
-      {/* Детали: цена и длительность */}
       <div className="mt-5 grid grid-cols-2 gap-2">
         <div className="rounded-2xl bg-slate-50 p-3 text-center">
           <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">
@@ -69,7 +62,6 @@ export function BookingDetailsSheet({ booking, onClose, onCancel }) {
         </div>
       </div>
 
-      {/* Мастер */}
       <div className="mt-4 flex items-center gap-3 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-left">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-teal-600 text-white">
           <User className="h-6 w-6" />
@@ -83,13 +75,11 @@ export function BookingDetailsSheet({ booking, onClose, onCancel }) {
         </div>
       </div>
 
-      {/* Информация о подтверждении */}
       <p className="mt-3 flex items-start gap-1.5 px-2 text-[11px] leading-relaxed text-slate-400">
         <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         За 2 часа до начала придёт кнопка подтверждения. Если не нажать — запись может быть передана другому.
       </p>
 
-      {/* Отмена */}
       <button
         onClick={() => onCancel(booking.booking_id)}
         className="mt-4 w-full rounded-xl bg-red-50 py-4 font-bold text-red-600 transition active:scale-[0.98]"

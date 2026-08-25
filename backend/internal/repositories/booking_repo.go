@@ -229,11 +229,13 @@ func (b *BookingRepo) GetBookingByID(ctx context.Context, tx pgx.Tx, bookingID i
 	return booking, nil
 }
 
-// 🔥 НОВЫЙ: Мягкое удаление — меняем статус вместо DELETE
 func (b *BookingRepo) CancelBooking(ctx context.Context, tx pgx.Tx, bookingID int64) error {
+	// Добавляем slot_id = NULL в SET
 	query := `
 		UPDATE bookings 
-		SET status = $1, updated_at = NOW() 
+		SET status = $1, 
+		    slot_id = NULL, 
+		    updated_at = NOW() 
 		WHERE id = $2
 	`
 	result, err := tx.Exec(ctx, query, models.BookingStatusCancelledByClient, bookingID)

@@ -400,13 +400,13 @@ export function StudioTab() {
               </div>
             </div>
 
+          </div>
             <button
               onClick={handleSaveSettings}
               className="mt-4 w-full rounded-xl bg-emerald-500 py-3 font-bold text-white transition active:scale-[0.98]"
             >
               Сохранить настройки
             </button>
-          </div>
         </section>
       </div>
 

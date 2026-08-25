@@ -9,12 +9,16 @@ export function MasterPage() {
   const [tab, setTab] = useState('today')
 
   return (
-    <div className="animate-fade-up pb-28">
+    <div className="pb-28">
       <div className="px-5 pt-6">
-        {tab === 'today'   && <TodayTab />}
-        {tab === 'queue'   && <QueueTab />}
-        {tab === 'studio'  && <StudioTab />}
-        {tab === 'profile' && <ProfileTab />}
+        {/* key={tab} заставляет React перемонтировать блок при смене вкладки
+            → срабатывает animate-fade-up для плавного появления */}
+        <div key={tab} className="animate-fade-up">
+          {tab === 'today'   && <TodayTab />}
+          {tab === 'queue'   && <QueueTab />}
+          {tab === 'studio'  && <StudioTab />}
+          {tab === 'profile' && <ProfileTab />}
+        </div>
       </div>
       <MasterFloatingNav active={tab} onChange={setTab} />
     </div>
