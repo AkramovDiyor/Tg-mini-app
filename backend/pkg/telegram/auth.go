@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log" // <-- Добавь этот импорт
 	"net/url"
 	"sort"
 	"strings"
@@ -20,77 +19,52 @@ type WebAppUser struct {
 	Username  string `json:"username"`
 }
 
-func ValidateInitData(initData string, botToken string) (int64, string, error) {
-	// 🔥 ОТЛАДКА: Смотрим, что именно прислал Telegram (первые 150 символов)
-	log.Printf("🔍 RAW initData: %s", initData[:min(len(initData), 150)])
-
+// 🔥 ВОЗВРАЩАЕМ ВСЮ СТРУКТУРУ ПОЛЬЗОВАТЕЛЯ
+func ValidateInitData(initData string, botToken string) (WebAppUser, string, error) {
 	params, err := url.ParseQuery(initData)
 	if err != nil {
-		return 0, "", err
+		return WebAppUser{}, "", err
 	}
 
-	// 🔥 ОТЛАДКА: Печатаем все ключи, которые пришли от Telegram
+	hash := params.Get("hash")
+	if hash == "" {
+		return WebAppUser{}, "", errors.New("hash не найден")
+	}
+	params.Del("hash")
+
 	var keys []string
 	for k := range params {
 		keys = append(keys, k)
 	}
-	log.Printf("🔍 Все ключи в initData: %v", keys)
-
-	hash := params.Get("hash")
-	if hash == "" {
-		return 0, "", errors.New("hash не найден в initData")
-	}
-	params.Del("hash")
-
 	sort.Strings(keys)
-	// Убираем 'hash' из ключей для проверки, так как мы его уже удалили из params, 
-	// но keys мы собрали ДО удаления. Пересоберем keys без hash:
-	var dataCheckKeys []string
-	for k := range params {
-		dataCheckKeys = append(dataCheckKeys, k)
-	}
-	sort.Strings(dataCheckKeys)
 
 	var dataCheckStrings []string
-	for _, k := range dataCheckKeys {
+	for _, k := range keys {
 		dataCheckStrings = append(dataCheckStrings, fmt.Sprintf("%s=%s", k, params.Get(k)))
 	}
-	dataCheckString := strings.Join(dataCheckStrings, "\n")
 
 	secretKey := hmac.New(sha256.New, []byte("WebAppData"))
 	secretKey.Write([]byte(botToken))
 	secretKeyBytes := secretKey.Sum(nil)
 
 	h := hmac.New(sha256.New, secretKeyBytes)
-	h.Write([]byte(dataCheckString))
+	h.Write([]byte(strings.Join(dataCheckStrings, "\n")))
 	calculatedHash := hex.EncodeToString(h.Sum(nil))
 
 	if calculatedHash != hash {
-		return 0, "", errors.New("невалидная подпись initData")
+		return WebAppUser{}, "", errors.New("невалидная подпись")
 	}
 
 	var user WebAppUser
 	userJSON := params.Get("user")
 	if userJSON == "" {
-		return 0, "", errors.New("user не найден в initData")
+		return WebAppUser{}, "", errors.New("user не найден")
 	}
 
-	err = json.Unmarshal([]byte(userJSON), &user)
-	if err != nil {
-		return 0, "", err
+	if err := json.Unmarshal([]byte(userJSON), &user); err != nil {
+		return WebAppUser{}, "", err
 	}
 
-	// 🔥 ДОСТАЕМ start_param
 	startParam := params.Get("start_param")
-	log.Printf("🔍 Извлеченный start_param: '%s'", startParam) // <-- Пустые кавычки означают, что Telegram его не прислал
-
-	return user.ID, startParam, nil
-}
-
-// Вспомогательная функция для min (если используешь Go < 1.21)
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	return user, startParam, nil
 }

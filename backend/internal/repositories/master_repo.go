@@ -12,6 +12,7 @@ import (
 
 // ========== INTERFACE ==========
 type MasterRepository interface {
+	GetMasterByID(ctx context.Context, id int64) (models.Master, error)
 	ExistsByTelegramID(ctx context.Context, telegramID int64) (bool, error)
 	CreateMaster(ctx context.Context, master models.Master) error
 	GetMasterByInviteLink(ctx context.Context, link string) (models.Master, error)
@@ -27,6 +28,13 @@ type MasterRepo struct {
 
 func NewMasterRepo(db *pgxpool.Pool) *MasterRepo {
 	return &MasterRepo{db: db}
+}
+
+func (m *MasterRepo) GetMasterByID(ctx context.Context, id int64) (models.Master, error) {
+    var master models.Master
+    err := m.db.QueryRow(ctx, "SELECT id, telegram_id, name FROM masters WHERE id = $1", id).
+        Scan(&master.ID, &master.TelegramID, &master.Name)
+    return master, err
 }
 
 // ExistsByTelegramID проверяет существование мастера по telegram_id
