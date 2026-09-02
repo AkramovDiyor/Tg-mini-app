@@ -6,7 +6,6 @@ import (
 	"backend/internal/services"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -144,7 +143,6 @@ func (h *BookingHandler) BookSlot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("📋 [BOOK] Клиент %d (%s) записывается на услугу %d", tgID, realClientName, req.ServiceID)
 
 	startTime, err := time.Parse(time.RFC3339, req.StartTime)
 	if err != nil {
