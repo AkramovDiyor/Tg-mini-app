@@ -6,6 +6,7 @@ import (
 	tgbot "backend/internal/delivery/telegram"
 	"backend/internal/repositories"
 	service "backend/internal/services"
+	"backend/internal/worker"
 	"backend/pkg/database"
 	"context"
 	"log"
@@ -15,36 +16,39 @@ import (
 	"syscall"
 	"time"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5" // 🔥 ДОБАВЬ ЭТОТ ИМПОРТ
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func main() {
+	// Устанавливаем часовой пояс Москвы
 	moscow, err := time.LoadLocation("Europe/Moscow")
 	if err != nil {
-		log.Fatalf("❌ Не удалось загрузить часовой пояс Москвы: %v", err)
+		log.Fatalf("Failed to load Moscow timezone: %v", err)
 	}
 	time.Local = moscow
-	log.Println("🕐 Часовой пояс установлен: Europe/Moscow")
 
+	// Загружаем конфигурацию
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("❌ Ошибка конфигурации: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
+	// Подключаемся к базе данных
 	pool, err := database.NewPostgres(cfg)
 	if err != nil {
-		log.Fatalf("❌ Ошибка подключения к БД: %v", err)
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer pool.Close()
+	log.Println("Database connected")
 
-	// 🔥 1. СОЗДАЕМ БОТА ОДИН РАЗ ЗДЕСЬ
+	// Инициализируем Telegram бота
 	bot, err := tgbotapi.NewBotAPI(cfg.TgBotToken)
 	if err != nil {
-		log.Fatalf("❌ Ошибка инициализации Telegram бота: %v", err)
+		log.Fatalf("Failed to initialize Telegram bot: %v", err)
 	}
-	log.Printf("✅ Бот авторизован как @%s", bot.Self.UserName)
+	log.Printf("Bot authorized as @%s", bot.Self.UserName)
 
-	// Репозитории
+	// Инициализируем репозитории
 	masterRepo := repositories.NewMasterRepo(pool)
 	serviceRepo := repositories.NewServiceRepo(pool)
 	slotRepo := repositories.NewSlotRepo(pool)
@@ -53,33 +57,12 @@ func main() {
 	clientRepo := repositories.NewClientRepo(pool)
 	photoRepo := repositories.NewPhotoRepo(pool)
 
-	// Сервисы
+	// Инициализируем сервисы
 	masterService := service.NewMasterService(masterRepo)
-	
-	// 🔥 2. ПЕРЕДАЕМ ЭКЗЕМПЛЯР БОТА В СЕРВИС (вместо nil!)
 	bookingService := service.NewBookingService(pool, slotRepo, bookingRepo, serviceRepo, clientRepo, masterRepo, bot)
-	
 	slotService := service.NewSlotService(masterRepo, serviceRepo, bookingRepo)
 
-	// Seed тестовых данных
-	ctxSeed := context.Background()
-	master, err := masterService.RegisterMaster(ctxSeed, 999999, "Педро Барбер")
-	if err != nil {
-		log.Printf("⚠️ Ошибка при посеве мастера: %v", err)
-		master, _ = masterRepo.GetMasterByTelegramID(ctxSeed, 999999)
-	}
-	_, err = clientRepo.GetOrCreateClient(ctxSeed, 777111222, "vasya_test", "Вася Тестовый")
-	if err != nil {
-		log.Printf("⚠️ Ошибка при посеве клиента: %v", err)
-	}
-
-	log.Println("----------------------------------------")
-	log.Println("🌱 ТЕСТОВЫЕ ДАННЫЕ ГОТОВЫ!")
-	log.Printf("🛠 Панель мастера: ?mode=master")
-	log.Printf("✂️ Клиентская часть: ?startapp=%s", master.InviteLink)
-	log.Println("----------------------------------------")
-
-	// Хендлеры
+	// Инициализируем HTTP хендлеры
 	bookingHandler := httpapi.NewBookingHandler(
 		masterRepo, serviceRepo, slotRepo, bookingRepo, photoRepo, bookingService, slotService,
 	)
@@ -87,25 +70,24 @@ func main() {
 	photoHandler := httpapi.NewPhotoHandler(photoRepo, masterRepo)
 	meHandler := httpapi.NewMeHandler(masterRepo)
 
-	// Роутер
+	// Создаем роутер
 	router := httpapi.NewRouter(bookingHandler, masterHandler, photoHandler, meHandler, cfg.TgBotToken)
 
-	// 🔥 3. ПЕРЕДАЕМ БОТА В ОБРАБОТЧИК TELEGRAM
+	// Запускаем Telegram бота
 	telegramHandler := tgbot.NewHandler(masterService, cfg.WebAppURL, bot)
 
-	// 🔥 4. ЗАПУСКАЕМ СЛУШАТЕЛЬ СООБЩЕНИЙ БОТА В ГОРУТИНЕ
 	go func() {
 		u := tgbotapi.NewUpdate(0)
 		u.Timeout = 60
 		updates := bot.GetUpdatesChan(u)
-		
-		log.Println("🚀 Telegram-бот запущен и слушает обновления...")
-		
+
+		log.Println("Telegram bot started")
+
 		for update := range updates {
 			go func(upd tgbotapi.Update) {
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("💥 Паника в обработчике бота: %v", r)
+						log.Printf("Panic in bot handler: %v", r)
 					}
 				}()
 				if upd.Message != nil {
@@ -115,30 +97,41 @@ func main() {
 		}
 	}()
 
-	// HTTP-сервер
+	// Запускаем воркер напоминаний
+	workerCtx, workerCancel := context.WithCancel(context.Background())
+	scheduler := worker.NewScheduler(bot, bookingRepo, serviceRepo, masterRepo)
+	go scheduler.Start(workerCtx)
+	log.Println("Reminder worker started")
+
+	// Запускаем HTTP сервер
 	httpServer := &http.Server{
 		Addr:    "0.0.0.0:8080",
 		Handler: router,
 	}
 
 	go func() {
-		log.Println("🚀 HTTP-сервер запущен на порту 8080")
+		log.Println("HTTP server started on :8080")
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("❌ Ошибка HTTP-сервера: %v", err)
+			log.Fatalf("HTTP server error: %v", err)
 		}
 	}()
 
+	// Ждем сигнала завершения
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
-	log.Println("🛑 Получен сигнал завершения. Останавливаем сервер...")
+	log.Println("Shutting down server...")
 
+	// Останавливаем воркер
+	workerCancel()
+
+	// Graceful shutdown HTTP сервера
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := httpServer.Shutdown(ctx); err != nil {
-		log.Printf("❌ Ошибка graceful shutdown HTTP: %v", err)
+		log.Printf("HTTP server shutdown error: %v", err)
 	}
 
-	log.Println("✅ Сервер остановлен. До встречи!")
+	log.Println("Server stopped")
 }

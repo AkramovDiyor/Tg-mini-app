@@ -16,7 +16,7 @@ type ClientBookingResponse struct {
 	BookingID        int64     `json:"booking_id"`
 	ClientName       string    `json:"client_name"`
 	ServiceName      string    `json:"service_name"`
-	ServiceDuration   int       `json:"service_duration"`
+	ServiceDuration  int       `json:"service_duration"`
 	ServicePrice     int       `json:"service_price"`
 	MasterName       string    `json:"master_name"`
 	MasterAddress    string    `json:"master_address"`
@@ -32,10 +32,13 @@ type BookingRepository interface {
 	GetBookingBySlotID(ctx context.Context, slotID int64) (models.Booking, error)
 	GetBookingsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Booking, error)
 	GetBookingsByClientTgID(ctx context.Context, tgID int64) ([]ClientBookingResponse, error)
-	
+
 	// НОВЫЕ методы для отмены
 	GetBookingByID(ctx context.Context, tx pgx.Tx, bookingID int64) (models.Booking, error)
 	CancelBooking(ctx context.Context, tx pgx.Tx, bookingID int64) error
+
+	GetBookingsForReminder(ctx context.Context) ([]models.Booking, error)
+	MarkReminderSent(ctx context.Context, bookingID int64) error
 }
 
 type BookingRepo struct {
@@ -47,20 +50,20 @@ func NewBookingRepo(db *pgxpool.Pool) *BookingRepo {
 }
 
 func (b *BookingRepo) CreateBooking(ctx context.Context, tx pgx.Tx, booking models.Booking) error {
-    query := `INSERT INTO bookings 
+	query := `INSERT INTO bookings 
         (slot_id, service_id, master_id, client_telegram_id, client_name, price_locked, status) 
         VALUES ($1, $2, $3, $4, $5, $6, $7)`
-    
-    _, err := tx.Exec(ctx, query, 
-        booking.SlotID, 
-        booking.ServiceID, 
-        booking.MasterID,  // 🔥 ДОБАВЛЕНО
-        booking.ClientTelegramID, 
-        booking.ClientName, 
-        booking.PriceLocked, 
-        booking.Status,
-    )
-    return err
+
+	_, err := tx.Exec(ctx, query,
+		booking.SlotID,
+		booking.ServiceID,
+		booking.MasterID, // 🔥 ДОБАВЛЕНО
+		booking.ClientTelegramID,
+		booking.ClientName,
+		booking.PriceLocked,
+		booking.Status,
+	)
+	return err
 }
 
 func (b *BookingRepo) GetBookingBySlotID(ctx context.Context, slotID int64) (models.Booking, error) {
@@ -73,11 +76,11 @@ func (b *BookingRepo) GetBookingBySlotID(ctx context.Context, slotID int64) (mod
 }
 
 func (b *BookingRepo) GetBookingsByMasterAndDate(ctx context.Context, masterID int64, date time.Time) ([]models.Booking, error) {
-    startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
-    endOfDay := startOfDay.Add(24 * time.Hour)
+	startOfDay := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, date.Location())
+	endOfDay := startOfDay.Add(24 * time.Hour)
 
-    // 🔥 ИСПРАВЛЕНО: достаём ВСЕ поля из bookings
-    query := `
+	// 🔥 ИСПРАВЛЕНО: достаём ВСЕ поля из bookings
+	query := `
         SELECT 
             b.id,
             b.slot_id,
@@ -99,36 +102,36 @@ func (b *BookingRepo) GetBookingsByMasterAndDate(ctx context.Context, masterID i
           AND b.status NOT IN ('cancelled_by_client', 'cancelled_no_show')
         ORDER BY s.start_time ASC
     `
-    
-    rows, err := b.db.Query(ctx, query, masterID, startOfDay, endOfDay)
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
 
-    var bookings []models.Booking
-    for rows.Next() {
-        var bk models.Booking
-        err := rows.Scan(
-            &bk.ID,
-            &bk.SlotID,
-            &bk.ServiceID,
-            &bk.MasterID,
-            &bk.ClientTelegramID,
-            &bk.ClientName,
-            &bk.PriceLocked,
-            &bk.Status,
-            &bk.StartTime,
-            &bk.EndTime,
-            &bk.CreatedAt,
-            &bk.UpdatedAt,
-        )
-        if err != nil {
-            return nil, err
-        }
-        bookings = append(bookings, bk)
-    }
-    return bookings, nil
+	rows, err := b.db.Query(ctx, query, masterID, startOfDay, endOfDay)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bookings []models.Booking
+	for rows.Next() {
+		var bk models.Booking
+		err := rows.Scan(
+			&bk.ID,
+			&bk.SlotID,
+			&bk.ServiceID,
+			&bk.MasterID,
+			&bk.ClientTelegramID,
+			&bk.ClientName,
+			&bk.PriceLocked,
+			&bk.Status,
+			&bk.StartTime,
+			&bk.EndTime,
+			&bk.CreatedAt,
+			&bk.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		bookings = append(bookings, bk)
+	}
+	return bookings, nil
 }
 
 func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) ([]ClientBookingResponse, error) {
@@ -167,17 +170,17 @@ func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) (
 	for rows.Next() {
 		var resp ClientBookingResponse
 		err := rows.Scan(
-			&resp.BookingID, 
-			&resp.ClientName, 
+			&resp.BookingID,
+			&resp.ClientName,
 			&resp.ServiceName,
-			&resp.ServiceDuration,  // 🔥 НОВОЕ
+			&resp.ServiceDuration, // 🔥 НОВОЕ
 			&resp.ServicePrice,
-			&resp.MasterName, 
-			&resp.MasterAddress, 
+			&resp.MasterName,
+			&resp.MasterAddress,
 			&resp.MasterInviteLink,
-			&resp.StartTime, 
-			&resp.EndTime, 
-			&resp.Status, 
+			&resp.StartTime,
+			&resp.EndTime,
+			&resp.Status,
 			&resp.CreatedAt,
 		)
 		if err != nil {
@@ -191,41 +194,40 @@ func (b *BookingRepo) GetBookingsByClientTgID(ctx context.Context, tgID int64) (
 
 // 🔥 НОВЫЙ: Получаем запись по ID с блокировкой строки (FOR UPDATE)
 
-
 func (b *BookingRepo) GetBookingByID(ctx context.Context, tx pgx.Tx, bookingID int64) (models.Booking, error) {
 	var booking models.Booking
-	var masterID sql.NullInt64  // 🔥 Nullable тип
-	
+	var masterID sql.NullInt64 // 🔥 Nullable тип
+
 	query := `
 		SELECT id, slot_id, service_id, master_id, client_telegram_id, client_name, status, created_at 
 		FROM bookings 
 		WHERE id = $1 
 		FOR UPDATE
 	`
-	
+
 	err := tx.QueryRow(ctx, query, bookingID).Scan(
 		&booking.ID,
 		&booking.SlotID,
 		&booking.ServiceID,
-		&masterID,  // 🔥 Сканируем в nullable тип
+		&masterID, // 🔥 Сканируем в nullable тип
 		&booking.ClientTelegramID,
 		&booking.ClientName,
 		&booking.Status,
 		&booking.CreatedAt,
 	)
-	
+
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return models.Booking{}, fmt.Errorf("запись не найдена")
 		}
 		return models.Booking{}, err
 	}
-	
+
 	// Преобразуем в int64 (0 если NULL)
 	if masterID.Valid {
 		booking.MasterID = masterID.Int64
 	}
-	
+
 	return booking, nil
 }
 
@@ -246,6 +248,70 @@ func (b *BookingRepo) CancelBooking(ctx context.Context, tx pgx.Tx, bookingID in
 	// Проверяем, что реально обновили строку
 	if result.RowsAffected() == 0 {
 		return fmt.Errorf("запись не найдена или уже отменена")
+	}
+
+	return nil
+}
+
+
+func (b *BookingRepo) GetBookingsForReminder(ctx context.Context) ([]models.Booking, error) {
+	query := `
+		SELECT 
+			b.id,
+			b.slot_id,
+			b.service_id,
+			b.master_id,
+			b.client_telegram_id,
+			b.client_name,
+			b.price_locked,
+			b.status,
+			s.start_time,
+			s.end_time,
+			b.created_at,
+			b.updated_at
+		FROM bookings b
+		JOIN slots s ON b.slot_id = s.id
+		WHERE b.status = 'active'
+		  AND b.reminder_sent = FALSE
+		  AND s.start_time <= NOW() + INTERVAL '2 hours'
+		  AND s.start_time > NOW()
+		ORDER BY s.start_time ASC
+	`
+
+	rows, err := b.db.Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get bookings for reminder: %w", err)
+	}
+	defer rows.Close()
+
+	var bookings []models.Booking
+	for rows.Next() {
+		var bk models.Booking
+		err := rows.Scan(
+			&bk.ID, &bk.SlotID, &bk.ServiceID, &bk.MasterID, &bk.ClientTelegramID,
+			&bk.ClientName, &bk.PriceLocked, &bk.Status, &bk.StartTime, &bk.EndTime,
+			&bk.CreatedAt, &bk.UpdatedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan booking: %w", err)
+		}
+		bookings = append(bookings, bk)
+	}
+
+	return bookings, nil
+}
+
+// MarkReminderSent — помечает, что напоминание отправлено
+func (b *BookingRepo) MarkReminderSent(ctx context.Context, bookingID int64) error {
+	query := `UPDATE bookings SET reminder_sent = TRUE, updated_at = NOW() WHERE id = $1`
+	
+	result, err := b.db.Exec(ctx, query, bookingID)
+	if err != nil {
+		return fmt.Errorf("failed to mark reminder as sent: %w", err)
+	}
+
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("booking with id %d not found", bookingID)
 	}
 
 	return nil

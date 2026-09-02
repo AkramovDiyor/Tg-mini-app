@@ -51,27 +51,16 @@ func AuthMiddleware(tgBotToken string) func(http.Handler) http.Handler {
 			var startParam string
 			var tgUser telegram.WebAppUser
 
-			if initData == "test-vasya" {
-				tgID = 777111222
-				startParam = r.URL.Query().Get("startapp")
-				tgUser = telegram.WebAppUser{ID: 777111222, FirstName: "Тестовый", LastName: "Клиент"}
-			} else if initData == "test-master" {
-				tgID = 999999
-				startParam = "master"
-				tgUser = telegram.WebAppUser{ID: 999999, FirstName: "Тестовый", LastName: "Мастер"}
-			} else {
-				var err error
-				tgUser, startParam, err = telegram.ValidateInitData(initData, tgBotToken)
-				if err != nil {
-					log.Printf("❌ Ошибка валидации: %v", err)
-					http.Error(w, "Invalid Signature", http.StatusUnauthorized)
-					return
-				}
-				tgID = tgUser.ID
-				log.Printf("✅ Авторизация: tgID=%d, name=%s %s", tgID, tgUser.FirstName, tgUser.LastName)
+			var err error
+			tgUser, startParam, err = telegram.ValidateInitData(initData, tgBotToken)
+			if err != nil {
+				log.Printf("❌ Ошибка валидации: %v", err)
+				http.Error(w, "Invalid Signature", http.StatusUnauthorized)
+				return
 			}
+			tgID = tgUser.ID
+			log.Printf("✅ Авторизация: tgID=%d, name=%s %s", tgID, tgUser.FirstName, tgUser.LastName)
 
-			// 🔥 ИСПРАВЛЕНО: используем := для первого присвоения ctx
 			ctx := context.WithValue(r.Context(), TgIDKey, tgID)
 			ctx = context.WithValue(ctx, StartParamKey, startParam)
 			ctx = context.WithValue(ctx, TelegramUserKey, tgUser)
