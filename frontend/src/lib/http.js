@@ -1,8 +1,8 @@
 import axios from 'axios'
 import { getInitData } from './telegram'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api/v1'
-export const STATIC_BASE_URL = import.meta.env.VITE_STATIC_BASE || 'http://localhost:8080'
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://tg-mini-app-j29w.onrender.com/api/v1'
+export const STATIC_BASE_URL = import.meta.env.VITE_STATIC_BASE || 'https://tg-mini-app-j29w.onrender.com'
 
 const INIT_DATA = getInitData()
 
