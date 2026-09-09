@@ -26,7 +26,7 @@ export const AVATAR_GRADIENTS = [
 // 4 вкладки вместо 3
 export const MASTER_TABS = [
   { id: 'today',   icon: CalendarDays },
-  { id: 'queue',   icon: Users        },
+  // { id: 'queue',   icon: Users        },
   { id: 'studio',  icon: Store        }, // ← НОВАЯ
   { id: 'profile', icon: User         },
 ]
