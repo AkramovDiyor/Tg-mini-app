@@ -13,7 +13,7 @@ export function MasterPage() {
       <div className="px-5 pt-6">
         <div className="animate-fade-up">
           {tab === 'today' && <TodayTab />}
-          {tab === 'queue' && <QueueTab />}
+          {/* {tab === 'queue' && <QueueTab />} */}
           {tab === 'studio' && <StudioTab />}
           {tab === 'profile' && <ProfileTab />}
         </div>
