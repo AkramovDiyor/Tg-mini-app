@@ -103,11 +103,15 @@ func main() {
 	go scheduler.Start(workerCtx)
 	log.Println("Reminder worker started")
 
-	// Запускаем HTTP сервер
-	httpServer := &http.Server{
-		Addr:    "0.0.0.0:8080",
-		Handler: router,
-	}
+    port := os.Getenv("PORT")
+    if port == "" {
+        port = "8080"
+    }
+
+    httpServer := &http.Server{
+        Addr:    ":" + port,
+        Handler: router,
+    }
 
 	go func() {
 		log.Println("HTTP server started on :8080")
