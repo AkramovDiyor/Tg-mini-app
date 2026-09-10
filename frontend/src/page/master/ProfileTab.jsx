@@ -79,7 +79,7 @@ export function ProfileTab() {
         <section className="rounded-2xl bg-slate-900 p-4 text-white shadow-xl shadow-slate-900/20">
           <p className="text-sm font-bold">Твоя персональная ссылка</p>
           <p className="mt-1.5 truncate font-mono text-xs text-emerald-400">
-            {profile?.invite_link || 'Ссылка не создана'}
+            {`https://t.me/myslotify_bot/app?startapp=${profile?.invite_link}`} || Ссылка не создана
           </p>
           <button
             type="button"
