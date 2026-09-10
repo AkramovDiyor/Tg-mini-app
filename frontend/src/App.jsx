@@ -9,16 +9,13 @@ import { useMeQuery } from './hooks/useMeQuery'
 import { getClientDisplayName } from './lib/telegram'
 import { useBookingStore } from './store/bookingStore'
 
-// 🔥 OPTIMIZED: мастер и клиент не тянут бандлы друг друга
-const ServicesPage = lazy(() =>
-  import('./page/ServicesPage').then((m) => ({ default: m.ServicesPage })),
-)
-const BookingPage = lazy(() =>
-  import('./page/BookingPage').then((m) => ({ default: m.BookingPage })),
-)
-const MasterPage = lazy(() =>
-  import('./page/MasterPage').then((m) => ({ default: m.MasterPage })),
-)
+const masterPagePromise = import('./page/MasterPage').then((m) => m.MasterPage)
+const servicesPagePromise = import('./page/ServicesPage').then((m) => m.ServicesPage)
+const bookingPagePromise = import('./page/BookingPage').then((m) => m.BookingPage)
+
+const MasterPage = lazy(() => Promise.resolve({ default: masterPagePromise }))
+const ServicesPage = lazy(() => Promise.resolve({ default: servicesPagePromise }))
+const BookingPage = lazy(() => Promise.resolve({ default: bookingPagePromise }))
 
 export default function App() {
   const { data: identity, isPending, isError, error, refetch } = useMeQuery()
