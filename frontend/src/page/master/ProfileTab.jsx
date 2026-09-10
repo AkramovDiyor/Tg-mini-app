@@ -23,7 +23,7 @@ export function ProfileTab() {
   const handleCopyLink = () => {
     if (!profile?.invite_link) return
     try {
-      navigator.clipboard?.writeText(profile.invite_link)
+      navigator.clipboard?.writeText(`https://t.me/myslotify_bot/app?startapp=${profile.invite_link}`)
       showToast('Ссылка скопирована в буфер обмена')
     } catch {
       showToast('Не удалось скопировать. Скопируйте вручную')
