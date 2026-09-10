@@ -9,13 +9,6 @@ import { useMeQuery } from './hooks/useMeQuery'
 import { getClientDisplayName } from './lib/telegram'
 import { useBookingStore } from './store/bookingStore'
 
-const masterPagePromise = import('./page/MasterPage').then((m) => m.MasterPage)
-const servicesPagePromise = import('./page/ServicesPage').then((m) => m.ServicesPage)
-const bookingPagePromise = import('./page/BookingPage').then((m) => m.BookingPage)
-
-const MasterPage = lazy(() => Promise.resolve({ default: masterPagePromise }))
-const ServicesPage = lazy(() => Promise.resolve({ default: servicesPagePromise }))
-const BookingPage = lazy(() => Promise.resolve({ default: bookingPagePromise }))
 
 export default function App() {
   const { data: identity, isPending, isError, error, refetch } = useMeQuery()
