@@ -148,7 +148,7 @@ export function ServicesPage({ inviteLink }) {
 
         {/* 🔥 БЛОК КАРТЫ ВНИЗУ СТРАНИЦЫ */}
         {masterAddress && masterAddress !== 'Не указан' && (
-          <div className="mt-6 px-5 mb-6">
+          <div className="mt-6 px-5 mb-9">
             <h2 className="mb-2 text-lg font-bold text-slate-900">Как добраться</h2>
             <a 
               href={mapUrl} 
