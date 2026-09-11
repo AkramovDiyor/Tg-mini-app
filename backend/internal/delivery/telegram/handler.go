@@ -35,10 +35,6 @@ func (h *Handler) HandleMessage(update *tgbotapi.Update) {
 	chatID := msg.Chat.ID
 	firstName := msg.From.FirstName
 
-	if !msg.IsCommand() || msg.Command() != "start" {
-		h.sendTextMessage(chatID, "🤖 Используй команду /start для начала работы.")
-		return
-	}
 
 	startParam := ""
 	args := msg.CommandArguments()
