@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { Image, Star, User } from 'lucide-react'
+import { Image, MapPin, Star, User, Navigation } from 'lucide-react' // Добавил MapPin и Navigation
 import { QueryRetry } from '../components/AppFrame'
 import { ServicesSkeleton } from '../components/skeletons/Skeletons'
 import { ServiceCard } from '../components/ui/ServiceCard'
@@ -52,6 +52,12 @@ export function ServicesPage({ inviteLink }) {
   const masterBio = profile?.bio || 'Барбер'
   const masterRating = profile?.rating || null
   const photos = profile?.photos || []
+  const masterAddress = profile?.address || null
+
+  // Формируем ссылку для открытия в картах (Яндекс карты отлично работают на мобилках)
+  const mapUrl = masterAddress 
+    ? `https://yandex.ru/maps/?text=${encodeURIComponent(masterAddress)}` 
+    : '#'
 
   return (
     <div className="animate-fade-up">
@@ -73,6 +79,19 @@ export function ServicesPage({ inviteLink }) {
             <Star className="h-3.5 w-3.5 fill-amber-400 text-amber-400" />
             {masterRating ? `${masterRating} · ${masterBio}` : masterBio}
           </span>
+
+          {/* 🔥 АДРЕС В ШАПКЕ */}
+          {masterAddress && masterAddress !== 'Не указан' && (
+            <a 
+              href={mapUrl} 
+              target="_blank" 
+              rel="noreferrer"
+              className="mt-3 flex items-center gap-1.5 text-xs text-white/80 transition active:scale-95"
+            >
+              <MapPin className="h-3.5 w-3.5" />
+              <span className="max-w-[250px] truncate">{masterAddress}</span>
+            </a>
+          )}
         </div>
       </div>
 
@@ -126,6 +145,31 @@ export function ServicesPage({ inviteLink }) {
             ))
           )}
         </div>
+
+        {/* 🔥 БЛОК КАРТЫ ВНИЗУ СТРАНИЦЫ */}
+        {masterAddress && masterAddress !== 'Не указан' && (
+          <div className="mt-6 px-5">
+            <h2 className="mb-2 text-lg font-bold text-slate-900">Как добраться</h2>
+            <a 
+              href={mapUrl} 
+              target="_blank" 
+              rel="noreferrer"
+              className="flex items-center gap-3 rounded-2xl bg-white p-4 shadow-sm transition active:scale-[0.98]"
+            >
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+                <MapPin className="h-6 w-6" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Адрес студии</p>
+                <p className="mt-0.5 font-bold text-slate-900">{masterAddress}</p>
+              </div>
+              <div className="flex items-center gap-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-bold text-white">
+                <Navigation className="h-3.5 w-3.5" />
+                Маршрут
+              </div>
+            </a>
+          </div>
+        )}
       </div>
 
       <ActiveBookingBar onOpenDetails={openDetails} />

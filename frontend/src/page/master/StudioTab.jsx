@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Clock, Plus, User, Trash2 } from 'lucide-react'
+import { Clock, Plus, Scissors, Trash2 } from 'lucide-react'
 import { QueryRetry } from '../../components/AppFrame'
 import { MasterListSkeleton } from '../../components/skeletons/Skeletons'
 import { Toggle } from '../../components/ui/Toggle'
@@ -176,7 +176,7 @@ export function StudioTab() {
                     className="flex w-full items-center gap-3 rounded-xl bg-slate-50 p-3 text-left transition active:scale-[0.98]"
                   >
                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
-                      <User className="h-5 w-5" />
+                      <Scissors className="h-5 w-5" />
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-bold text-slate-900">{service.name}</span>
